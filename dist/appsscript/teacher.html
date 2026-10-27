@@ -3,8 +3,10 @@
      교실 TV 가 아니라 선생님 모니터에서 열기 때문이다.
      ⚠ 정답표는 서버(Code.gs)가 암호를 확인한 뒤에만 내려 준다 — 학생 화면에는 들어가지 않는다. -->
 <script>
-var T = { pw: '', rows: [], key: {}, sel: null, loading: false, err: '', timer: null, imgs: {} };
+var T = { pw: '', rows: [], key: {}, sel: null, loading: false, err: '', timer: null, imgs: {},
+  size: 0 /* 반 인원 — 0 이면 「자동」 */ };
 try { T.pw = sessionStorage.getItem(KEY + '-tpw') || ''; } catch (e) {}
+try { T.size = Number(sessionStorage.getItem(KEY + '-tsize')) || 0; } catch (e) {}
 
 function rowKey(d) { return d.sid + '|' + d.sname; }
 
@@ -19,6 +21,115 @@ function countText() {
   var sent = T.rows.filter(function (d) { return d.status !== '작성 중'; }).length;
   return '들어온 학생 ' + T.rows.length + '명 · 제출 ' + sent + '명 · ' +
     '작성 중 ' + (T.rows.length - sent) + '명 · 30초마다 새로 고침';
+}
+
+/* ── 반별 제출 현황판 ──────────────────────────────────────────────
+   「어느 출석번호가 아직 안 냈나」를 한눈에 본다.
+   학번 끝 두 자리를 출석번호로, 그 앞을 반으로 읽는다
+   (20315 → 2학년 3반 15번 · 1315 → 1학년 3반 15번).
+   ⚠⚠ **들어오지 않은 학생은 시트에 줄이 아예 없다.** 그래서 빠진 번호를 세려면 반 인원을 알아야 하는데,
+   이 앱은 명단을 받지 않으므로(개인정보) 기본값은 「자동」 = 그 반에서 본 가장 큰 번호다.
+   뒷번호가 통째로 빠지면 자동으로는 알 수 없으니 선생님이 인원을 직접 고를 수 있게 두었다. */
+function classOf(sid) {
+  var s = String(sid || '').trim();
+  if (!/^[0-9]{4,5}$/.test(s)) return null;
+  return { key: s.slice(0, -2), no: Number(s.slice(-2)) };
+}
+/** 반 이름 — 키의 첫 자리가 학년, 나머지가 반 ('203' → 2학년 3반 · '13' → 1학년 3반) */
+function classLabel(key) {
+  return key.charAt(0) + '학년 ' + Number(key.slice(1)) + '반';
+}
+/** 칸 하나의 상태 — 안 들어옴 / 작성 중 / 제출 후 수정 / 제출함 */
+function numState(d) {
+  if (!d) return 'is-none';
+  if (d.status === '제출 후 수정') return 'is-edit';
+  if (d.status === '작성 중') return 'is-draft';
+  return 'is-sent';
+}
+/** 출석번호 칸 하나 — 누르면 그 학생이 아래 자세히 보기로 열린다 */
+function numChip(no, d) {
+  var el = h('span', {
+    class: 't-num ' + numState(d) + (d && rowKey(d) === T.sel ? ' is-sel' : ''),
+    text: String(no),
+    title: d ? d.sid + ' ' + d.sname + ' · ' + d.status : '아직 들어오지 않았습니다'
+  });
+  if (d) el.addEventListener('click', function () {
+    T.sel = rowKey(d);
+    renderT(); renderDetail();
+    tDetail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  return el;
+}
+/** 현황판 머리 — 반 인원 고르기와 색 안내 */
+function boardTop() {
+  var sel = h('select', null, [0, 20, 22, 24, 25, 26, 28, 30, 32, 35, 40].map(function (n) {
+    return h('option', { value: String(n), selected: T.size === n || null }, n ? n + '명' : '자동');
+  }));
+  sel.addEventListener('change', function () {
+    T.size = Number(sel.value) || 0;
+    try { sessionStorage.setItem(KEY + '-tsize', String(T.size)); } catch (e) {}
+    renderT();
+  });
+  return h('div', { class: 't-board-top' }, [
+    h('b', null, '반 인원'), sel,
+    h('span', null, '「자동」은 그 반에서 본 가장 큰 번호까지만 셉니다. 뒷번호가 통째로 빠졌다면 인원을 직접 골라 주세요.'),
+    h('span', { class: 't-legend' }, [
+      h('span', { class: 't-num is-sent' }, '제출'),
+      h('span', { class: 't-num is-edit' }, '제출 후 수정'),
+      h('span', { class: 't-num is-draft' }, '작성 중'),
+      h('span', { class: 't-num is-none' }, '안 들어옴')
+    ])
+  ]);
+}
+function renderBoard() {
+  var map = {}, odd = [];
+  T.rows.forEach(function (d) {
+    var c = classOf(d.sid);
+    if (!c) { odd.push(d); return; }
+    if (!map[c.key]) map[c.key] = {};
+    map[c.key][c.no] = d;
+  });
+  var keys = Object.keys(map).sort();
+  if (!keys.length && !odd.length) return null;
+
+  var kids = [boardTop()];
+  keys.forEach(function (key) {
+    var seen = map[key];
+    var nos = Object.keys(seen).map(Number);
+    var size = T.size || Math.max.apply(null, nos);
+    /* 1번부터 반 인원까지, 그 뒤에 인원보다 번호가 큰 학생(전학생 등)을 덧붙인다 */
+    var list = [];
+    for (var i = 1; i <= size; i++) list.push(i);
+    nos.filter(function (n) { return n > size; })
+      .sort(function (a, b) { return a - b; })
+      .forEach(function (n) { list.push(n); });
+
+    var sent = 0, draft = 0, miss = [];
+    var chips = list.map(function (n) {
+      var d = seen[n] || null;
+      if (!d) miss.push(n);
+      else if (d.status === '작성 중') draft++;
+      else sent++;
+      return numChip(n, d);
+    });
+
+    kids.push(h('div', { class: 't-cls' }, [
+      h('div', { class: 't-cls-head' }, [
+        h('b', null, classLabel(key)),
+        h('span', null, '제출 ' + sent + '명 · 작성 중 ' + draft + '명 · 안 들어옴 ' +
+          miss.length + '명 (반 인원 ' + size + '명 기준)')
+      ]),
+      h('div', { class: 't-nums' }, chips),
+      h('p', { class: 't-miss' }, miss.length
+        ? [document.createTextNode('아직 안 낸 번호 — '), h('b', { text: miss.join(', ') })]
+        : [document.createTextNode('빠진 번호가 없습니다.')])
+    ]));
+  });
+  if (odd.length) {
+    kids.push(h('p', { class: 't-miss', text: '학번 모양이 달라 반을 가리지 못한 학생 ' +
+      odd.length + '명 — ' + odd.map(function (d) { return d.sid; }).join(', ') }));
+  }
+  return h('div', { class: 't-board' }, kids);
 }
 
 /** 자동 채점 한 문항 — Code.gs 의 gradeOne_() 과 같은 규칙 */
@@ -198,6 +309,7 @@ function renderT() {
   ]);
 
   fill(tBody, [
+    renderBoard(),
     h('div', { style: 'margin-top:14px' }, table),
     h('details', { class: 'fold' }, [
       h('summary', null, '문항별 정답률'),
