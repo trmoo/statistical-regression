@@ -94,6 +94,15 @@ var ANSWER_KEY = {
 
 /** index.html 의 템플릿이 include('css') 꼴로 다른 파일을 끼워 넣을 때 쓴다 */
 function include(name) {
+  /* ⚠ 편집기 ▶ 단추는 파일의 첫 함수를 기본으로 고른다. 그때 name 이 없어
+     「잘못된 값」 이라는 알 수 없는 오류가 뜨므로, 무엇을 해야 하는지 알려 준다. */
+  if (!name) {
+    throw new Error(
+      'include( ) 는 화면을 끼워 넣는 내부 함수라 직접 실행하는 것이 아닙니다. '
+      + '시트를 준비하려면 편집기 위쪽 함수 목록에서 setupSheets 를 골라 실행하거나, '
+      + '시트로 돌아가 메뉴의 「① 시트 준비하기」 를 누르세요. '
+      + '학생 화면은 「배포 → 새 배포 → 웹 앱」 으로 나오는 주소로 열어야 합니다.');
+  }
   return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
 
