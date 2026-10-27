@@ -1,0 +1,316 @@
+<!-- 교사 결과 보기 (주소 끝에 ?page=teacher) — © 2026 티쳐무 · 모든 권리 보유
+     학생 화면과 달리 여기는 스크롤을 쓴다 — 서른 명을 한 표에서 보는 업무용 화면이고,
+     교실 TV 가 아니라 선생님 모니터에서 열기 때문이다.
+     ⚠ 정답표는 서버(Code.gs)가 암호를 확인한 뒤에만 내려 준다 — 학생 화면에는 들어가지 않는다. -->
+<script>
+var T = { pw: '', rows: [], key: {}, sel: null, loading: false, err: '', timer: null, imgs: {} };
+try { T.pw = sessionStorage.getItem(KEY + '-tpw') || ''; } catch (e) {}
+
+function rowKey(d) { return d.sid + '|' + d.sname; }
+
+/** 시각 한 칸 — 비어 있으면 「–」 */
+function tTime(ms) {
+  if (!ms) return '–';
+  return new Date(ms).toLocaleString('ko-KR',
+    { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+/** 머리의 숫자 줄 — 들어온 학생 · 제출 · 작성 중 */
+function countText() {
+  var sent = T.rows.filter(function (d) { return d.status !== '작성 중'; }).length;
+  return '들어온 학생 ' + T.rows.length + '명 · 제출 ' + sent + '명 · ' +
+    '작성 중 ' + (T.rows.length - sent) + '명 · 30초마다 새로 고침';
+}
+
+/** 자동 채점 한 문항 — Code.gs 의 gradeOne_() 과 같은 규칙 */
+function grade(k, v) {
+  if (!(k in T.key)) return null;
+  var ans = T.key[k];
+  if (v === undefined || v === null || String(v).trim() === '') return false;
+  var list = Array.isArray(ans) ? ans : [ans];
+  for (var i = 0; i < list.length; i++) {
+    var a = list[i];
+    if (typeof a === 'number') {
+      var x = Number(v);
+      if (isFinite(x) && Math.abs(x - a) <= Math.max(0.011, Math.abs(a) * 0.01)) return true;
+    } else if (String(v).trim() === String(a)) return true;
+  }
+  return false;
+}
+function answerText(k) {
+  var a = T.key[k];
+  if (a === undefined) return '';
+  return Array.isArray(a) ? a.join(' / ') : String(a);
+}
+function keyedFields() {
+  return FIELDS.filter(function (f) { return f[0] in T.key; });
+}
+/** 꼭 해야 하는 칸 — [심화](f[4])는 뺀다. 진행률의 분모다.
+    ⚠ 심화를 넣으면 「안 해도 된다」고 해 놓고 진행률이 끝까지 안 차 선생님이 헷갈린다. */
+function needFields() {
+  return FIELDS.filter(function (f) { return !f[4]; });
+}
+function scoreOf(d) {
+  var keyed = keyedFields();
+  var need = needFields();
+  return {
+    ok: keyed.filter(function (f) { return grade(f[0], d[f[0]]); }).length,
+    total: keyed.length,
+    txt: FIELDS.filter(function (f) { return f[3] && String(d[f[0]] || '').trim(); }).length,
+    txtTotal: FIELDS.filter(function (f) { return f[3]; }).length,
+    /* 진행률 — 채점이 아니라 **얼마나 적었는가** 다. 작성 중인 학생을 보는 값이라 비어 있지만 않으면 센다. */
+    done: need.filter(function (f) { return String(d[f[0]] || '').trim() !== ''; }).length,
+    need: need.length
+  };
+}
+/** 상태 알약 — 제출함 / 제출 후 수정 / 작성 중 */
+function statusChip(d) {
+  var s = d.status || '작성 중';
+  var cls = s === '제출함' ? 'ok' : (s === '제출 후 수정' ? 'warn' : 'draft');
+  return h('span', { class: 't-st ' + cls, text: s });
+}
+
+var tWrap, tBody, tDetail, tTools;
+function startTeacher() {
+  document.body.classList.add('t-mode');
+  tTools = h('div', { class: 't-tools' });
+  tBody = h('div');
+  tDetail = h('section', { class: 't-box t-detail', hidden: true });
+  tWrap = h('div', { class: 't-wrap' }, [
+    h('section', { class: 't-box' }, [
+      h('div', { class: 't-head' }, [h('h1', null, '학생 결과 보기'), tTools]),
+      tBody
+    ]),
+    tDetail,
+    h('p', { class: 'foot-copy', html: '광고비와 매출 학습지 · 교사 화면<br>' +
+      '© 2026 티쳐무 · 모든 권리 보유. 학교 수업 목적으로만 이용해 주세요.' })
+  ]);
+  document.body.appendChild(tWrap);
+  renderT();
+  if (T.pw) loadT();
+  clearInterval(T.timer);
+  T.timer = setInterval(function () { if (!document.hidden && T.pw) loadT(); }, 30000);
+}
+
+function loadT() {
+  if (!ONLINE || !T.pw || T.loading) return;
+  T.loading = true;
+  renderT();
+  call('apiList', T.pw).then(function (j) {
+    if (j && j.ok) {
+      T.rows = j.rows || [];
+      T.key = j.key || {};
+      T.err = '';
+      try { sessionStorage.setItem(KEY + '-tpw', T.pw); } catch (e) {}
+    } else if (j && j.error === 'wrong_password') {
+      T.err = '비밀번호가 맞지 않습니다.';
+      T.pw = '';
+      try { sessionStorage.removeItem(KEY + '-tpw'); } catch (e) {}
+    } else {
+      T.err = '결과를 불러오지 못했습니다.';
+    }
+  }).catch(function () {
+    T.err = '서버에 이어지지 않았습니다. 웹 앱 주소로 열었는지 확인하세요.';
+  }).then(function () {
+    T.loading = false;
+    renderT();
+    renderDetail();
+  });
+}
+
+function renderT() {
+  if (!ONLINE) {
+    fill(tTools, []);
+    fill(tBody, [h('p', { class: 'tip' },
+      '서버에 이어져 있지 않습니다. 앱스 스크립트 웹 앱 주소 끝에 ?page=teacher 를 붙여 열어 주세요.')]);
+    return;
+  }
+  if (!T.pw) {
+    fill(tTools, []);
+    var pwIn = h('input', { type: 'password', placeholder: '비밀번호', autocomplete: 'current-password' });
+    var form = h('form', { class: 't-login', onsubmit: function (e) {
+      e.preventDefault(); T.pw = pwIn.value; T.err = ''; loadT();
+    } }, [pwIn, h('button', { class: 'btn primary', type: 'submit' }, '열기')]);
+    fill(tBody, [
+      h('p', { class: 't-empty' }, '시트 메뉴 「② 교사 암호 정하기」에서 정한 비밀번호를 넣으세요.'),
+      form,
+      T.err ? h('p', { class: 'check warn', text: T.err }) : null
+    ]);
+    pwIn.focus();
+    return;
+  }
+
+  fill(tTools, [
+    h('span', { class: 's-msg', text: T.loading ? '불러오는 중…' : countText() }),
+    h('button', { class: 'btn small', type: 'button', onclick: loadT }, '새로 고침'),
+    h('button', { class: 'btn small', type: 'button', onclick: function () {
+      T.pw = ''; T.rows = []; T.sel = null;
+      try { sessionStorage.removeItem(KEY + '-tpw'); } catch (e) {}
+      renderT(); renderDetail();
+    } }, '잠그기')
+  ]);
+
+  if (T.err) { fill(tBody, [h('p', { class: 'check warn', text: T.err })]); return; }
+  if (!T.rows.length) {
+    fill(tBody, [h('p', { class: 't-empty', text: T.loading ? '' : '아직 들어온 학생이 없습니다.' })]);
+    return;
+  }
+
+  var rows = T.rows.slice().sort(function (a, b) {
+    return String(a.sid).localeCompare(String(b.sid), 'ko', { numeric: true });
+  });
+  var keyed = keyedFields();
+
+  var table = h('table', { class: 't-list' }, [
+    h('thead', null, [h('tr', null, [
+      h('th', { class: 'l' }, '학번'), h('th', { class: 'l' }, '이름'),
+      h('th', null, '상태'), h('th', null, '진행률'),
+      h('th', null, '채점 문항 정답'), h('th', null, '서술 작성'),
+      h('th', null, '캡처'), h('th', null, '제출 시각'), h('th', null, '마지막 움직임')
+    ])]),
+    h('tbody', null, rows.map(function (d) {
+      var sc = scoreOf(d);
+      var tr = h('tr', { class: (rowKey(d) === T.sel ? 'sel' : '') +
+          (d.status === '작성 중' ? ' is-draft' : '') }, [
+        h('td', { class: 'l', text: d.sid }),
+        h('td', { class: 'l', text: d.sname }),
+        h('td', null, statusChip(d)),
+        h('td', null, [
+          h('span', { class: 't-score', text: sc.done + '/' + sc.need }),
+          h('span', { class: 't-bar' }, h('i', { class: 'go',
+            style: 'width:' + (sc.need ? sc.done / sc.need * 100 : 0) + '%' }))
+        ]),
+        h('td', null, [
+          h('span', { class: 't-score', text: sc.ok + '/' + sc.total }),
+          h('span', { class: 't-bar' }, h('i', { style: 'width:' + (sc.total ? sc.ok / sc.total * 100 : 0) + '%' }))
+        ]),
+        h('td', { class: 't-score', text: sc.txt + '/' + sc.txtTotal }),
+        h('td', { class: 't-score', text: Object.keys(d.imgs || {}).length + '/' + IMG_KEYS.length }),
+        h('td', { text: tTime(d.submitAt) }),
+        h('td', { text: tTime(d.savedAt || d.updatedAt) })
+      ]);
+      tr.addEventListener('click', function () {
+        T.sel = rowKey(d);
+        renderT(); renderDetail();
+        tDetail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      return tr;
+    }))
+  ]);
+
+  fill(tBody, [
+    h('div', { style: 'margin-top:14px' }, table),
+    h('details', { class: 'fold' }, [
+      h('summary', null, '문항별 정답률'),
+      h('div', { class: 't-rate' }, keyed.map(function (f) {
+        /* ⚠ 정답률은 **제출한 학생만** 센다 — 아직 쓰고 있는 학생의 빈칸을 오답으로 세면
+           수업 중에 정답률이 터무니없이 낮게 보인다. */
+        var base = rows.filter(function (d) { return d.status !== '작성 중'; });
+        if (!base.length) base = rows;
+        var n = base.filter(function (d) { return grade(f[0], d[f[0]]); }).length;
+        return h('span', null, [
+          document.createTextNode(f[1] + ' '),
+          h('b', { text: Math.round(n / base.length * 100) + '%' }),
+          document.createTextNode(' (' + n + '/' + base.length + ')')
+        ]);
+      }))
+    ])
+  ]);
+}
+
+function renderDetail() {
+  var d = T.rows.filter(function (r) { return rowKey(r) === T.sel; })[0];
+  if (!T.pw || !d) { tDetail.hidden = true; fill(tDetail, []); return; }
+  var sc = scoreOf(d);
+  tDetail.hidden = false;
+
+  var del = h('button', { class: 'btn small danger', type: 'button' }, '이 학생 기록 삭제');
+  var armed = null;
+  del.addEventListener('click', function () {
+    if (!armed) {
+      del.textContent = '정말 삭제할까요? 한 번 더 누르기';
+      del.classList.add('arm');
+      armed = setTimeout(function () {
+        armed = null; del.textContent = '이 학생 기록 삭제'; del.classList.remove('arm');
+      }, 3000);
+      return;
+    }
+    clearTimeout(armed); armed = null;
+    call('apiDelete', T.pw, d.sid).then(function (j) {
+      if (!j || !j.ok) throw new Error('fail');
+      T.sel = null; loadT();
+    }).catch(function () { del.textContent = '삭제하지 못했습니다'; });
+  });
+
+  /* 비밀번호를 잊은 학생 — 해시만 지운다. 이름과 답안은 그대로 남는다. */
+  var rst = h('button', { class: 'btn small', type: 'button' }, '비밀번호 초기화');
+  var rArmed = null;
+  rst.addEventListener('click', function () {
+    if (!rArmed) {
+      rst.textContent = '정말 초기화할까요? 한 번 더 누르기';
+      rArmed = setTimeout(function () {
+        rArmed = null; rst.textContent = '비밀번호 초기화';
+      }, 3000);
+      return;
+    }
+    clearTimeout(rArmed); rArmed = null;
+    rst.textContent = '초기화하는 중…';
+    call('apiResetPw', T.pw, d.sid).then(function (j) {
+      rst.textContent = (j && j.ok) ? '✓ 초기화했습니다' : '계정이 없습니다';
+    }).catch(function () { rst.textContent = '초기화하지 못했습니다'; });
+  });
+
+  var parts = [h('div', { class: 't-head' }, [
+    h('h1', { style: 'font-size:21px', text: d.sid + ' ' + d.sname }),
+    h('div', { class: 't-tools' }, [
+      h('span', { class: 's-msg', text: '채점 문항 ' + sc.ok + '/' + sc.total }),
+      rst,
+      del,
+      h('button', { class: 'btn small', type: 'button', onclick: function () {
+        T.sel = null; renderT(); renderDetail();
+      } }, '닫기')
+    ])
+  ])];
+
+  [1, 2, 3, 4, 5].forEach(function (st) {
+    parts.push(h('h3', { text: STEP_NAMES[st] }));
+    parts.push(h('table', { class: 't-ans' }, [
+      h('thead', null, [h('tr', null, [
+        h('th', { class: 'l' }, '문항'), h('th', { class: 'l' }, '학생 답'),
+        h('th', { class: 'l' }, '정답'), h('th', null, '채점')
+      ])]),
+      h('tbody', null, FIELDS.filter(function (f) { return f[2] === st; }).map(function (f) {
+        var g = grade(f[0], d[f[0]]);
+        return h('tr', null, [
+          h('td', { text: f[1] }),
+          h('td', { class: f[3] ? 'txt' : 'v', text: d[f[0]] === undefined ? '' : d[f[0]] }),
+          h('td', { class: 'v', text: answerText(f[0]) }),
+          h('td', { class: 'mk', html: g === null ? '' : g ? '<span class="mk-o">○</span>' : '<span class="mk-x">✕</span>' })
+        ]);
+      }))
+    ]));
+    IMG_KEYS.filter(function (p) { return p[2] === st; }).forEach(function (p) {
+      var fid = (d.imgs || {})[p[0]];
+      if (!fid) { parts.push(h('p', { class: 't-empty', text: p[1] + ': 없음' })); return; }
+      var box = h('div', { class: 't-shot' }, h('span', { class: 's-msg', text: p[1] + ' 불러오는 중…' }));
+      parts.push(box);
+      var show = function (u) {
+        fill(box, [
+          h('img', { src: u, alt: '학생 캡처' }),
+          h('a', { href: 'https://drive.google.com/file/d/' + encodeURIComponent(fid) + '/view',
+            target: '_blank', rel: 'noopener' }, '드라이브에서 크게 보기')
+        ]);
+      };
+      if (T.imgs[fid]) { show(T.imgs[fid]); return; }
+      call('apiImage', T.pw, fid).then(function (j) {
+        if (!j || !j.ok) throw new Error('fail');
+        T.imgs[fid] = j.dataUrl;
+        show(j.dataUrl);
+      }).catch(function () {
+        fill(box, [h('span', { class: 's-msg warn' }, '캡처를 불러오지 못했습니다.')]);
+      });
+    });
+  });
+
+  fill(tDetail, parts);
+}
+</script>

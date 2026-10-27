@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!--
+  광고비와 매출 사이의 관계 알아보기 — 오렌지3 회귀 분석 학습지
+  © 2026 티쳐무 · 모든 권리 보유 (오픈소스 라이선스 없음)
+  학교 수업 목적으로만 이용해 주세요. 그 밖의 이용은 먼저 문의해 주세요.
+  「데이터 과학」 회귀 분석 모델 수업용. 데이터는 캐글 advertising 데이터셋.
+
+  이 파일은 앱스 스크립트가 doGet( ) 에서 템플릿으로 읽어 들인다.
+  ⚠ 아래 끼워 넣는 차례를 바꾸지 말 것 — 뒤 파일이 앞 파일의 값을 쓴다.
+     data → shots → howto → core → cards → teacher → boot
+     (tools/check.js ② 와 test/wiring.test.mjs 가 이 차례를 지킨다)
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <!-- 앱스 스크립트는 이 meta 를 지우고 Code.gs 의 addMetaTag 로 다시 넣는다.
+       여기 적어 두는 것은 dist/preview.html 을 브라우저에서 볼 때를 위한 것이다. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base target="_top">
+  <title>광고비와 매출 사이의 관계 알아보기</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+  <?!= include('css'); ?>
+</head>
+<body>
+
+<?!= include('data'); ?>
+<?!= include('shots'); ?>
+<?!= include('howto'); ?>
+<?!= include('core'); ?>
+<?!= include('cards'); ?>
+<?!= include('teacher'); ?>
+<script>var PAGE_HINT = '<?= PAGE ?>';</script>
+<?!= include('boot'); ?>
+
+</body>
+</html>

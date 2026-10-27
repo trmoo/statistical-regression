@@ -1,0 +1,508 @@
+<!-- 서버 통신·로그인·제출·시작 — © 2026 티쳐무 · 모든 권리 보유
+     같은 앱이 세 가지로 열린다.
+       gas     앱스 스크립트 웹 앱 주소. google.script.run 으로 Code.gs 를 부른다.
+       preview dist/preview.html. 가짜 시트 위의 진짜 Code.gs 를 바로 부른다.
+       solo    서버가 없을 때. 로그인·제출만 막고 학습지는 그대로 볼 수 있다.
+     ⚠ fetch 를 쓰지 않는다 — 앱스 스크립트가 내려 준 화면은 샌드박스 안이라 다른 주소로
+       요청하면 CORS 로 막힌다. google.script.run 은 그 벽을 넘는 공식 통로다.
+     ⚠ 누구인지는 **접속표(token)** 로만 가린다. 화면이 학번을 보내도 서버는 믿지 않는다. -->
+<script>
+var MODE = (typeof google !== 'undefined' && google.script && google.script.run) ? 'gas'
+  : (typeof FAKE_SERVER === 'function' ? 'preview' : 'solo');
+var ONLINE = MODE !== 'solo';
+
+/** Code.gs 의 함수 하나를 부른다 → Promise */
+function call(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  if (MODE === 'gas') {
+    return new Promise(function (res, rej) {
+      var r = google.script.run.withSuccessHandler(res).withFailureHandler(function (e) {
+        rej(new Error(e && e.message ? e.message : String(e)));
+      });
+      r[fn].apply(r, args);
+    });
+  }
+  if (MODE === 'preview') {
+    return Promise.resolve().then(function () { return FAKE_SERVER(fn, args); });
+  }
+  return Promise.reject(new Error('서버 없이 열려 있어요.'));
+}
+
+/** 주소의 ?page=… — 앱스 스크립트 안에서는 바깥 주소를 google.script.url 로 읽어야 한다 */
+function getParams() {
+  if (MODE === 'gas' && google.script.url) {
+    return new Promise(function (res) {
+      google.script.url.getLocation(function (loc) { res((loc && loc.parameter) || {}); });
+    });
+  }
+  return Promise.resolve((function () {
+    var out = {};
+    new URLSearchParams(location.search).forEach(function (v, k) { out[k] = v; });
+    if (location.hash === '#teacher') out.page = 'teacher';     // 예전 주소도 받아 준다
+    return out;
+  })());
+}
+
+
+/* ── 누구인가 ──
+   ME = { token, sid, name } 또는 null. 탭이 열려 있는 동안만 들고 있는다. */
+var ME = null;
+try { ME = JSON.parse(sessionStorage.getItem(KEY + '-me') || 'null'); } catch (e) { ME = null; }
+
+function setMe(me) {
+  ME = me;
+  try {
+    if (me) sessionStorage.setItem(KEY + '-me', JSON.stringify(me));
+    else sessionStorage.removeItem(KEY + '-me');
+  } catch (e) {}
+}
+
+/** 접속표가 풀렸을 때 — 적어 둔 답은 그대로 두고 로그인 화면으로 돌려보낸다 */
+function kickOut(msg) {
+  setMe(null);
+  go(0);
+  gate.msg = msg || '로그인이 풀렸어요. 다시 들어와 주세요.';
+  gate.step = 'id';
+  renderGate(document.getElementById('gateCol'));
+}
+
+/** 서버가 「접속표가 풀렸다」고 하면 true 를 돌려주고 로그인 화면으로 보낸다 */
+function expired_(j) {
+  if (j && j.expired) { kickOut(j.msg); return true; }
+  return false;
+}
+
+
+/* ── 로그인 화면 (첫 화면) ──
+   1단계 학번 → 2단계 비밀번호. 처음 오는 학생은 2단계에서 **이름과 비밀번호를 정한다.** */
+var gate = { step: 'id', sid: '', masked: '', msg: '', busy: false };
+
+function gateMsg(t, cls) {
+  var el = document.getElementById('gateMsg');
+  if (el) { el.textContent = t || ''; el.className = 's-msg ' + (cls || 'warn'); }
+}
+
+/** 칸 하나 — 라벨 + input. Enter 를 누르면 다음으로 넘어간다. */
+function gateField(label, type, ph, onEnter) {
+  var input = h('input', { type: type, placeholder: ph || '', autocomplete: 'off', 'aria-label': label });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); onEnter(); }
+  });
+  return { wrap: h('label', { class: 'gate-f' }, [h('span', { text: label }), input]), input: input };
+}
+
+function renderGate(col) {
+  if (!col) return;
+  if (!ONLINE) {
+    fill(col, [
+      h('h2', { html: '광고비와 <em>매출</em> 사이의<br>관계 알아보기' }),
+      h('p', { class: 'tip' }, '서버에 이어져 있지 않아 로그인과 제출을 할 수 없어요. ' +
+        '학습지는 그대로 보고 풀어 볼 수 있습니다. 선생님이 알려 준 주소로 열어 주세요.'),
+      h('div', { class: 'row' }, [
+        h('button', { class: 'btn green', type: 'button', onclick: next }, '그냥 둘러보기 →')
+      ])
+    ]);
+    return;
+  }
+
+  /* 이미 들어와 있는 학생 */
+  if (ME) {
+    fill(col, [
+      h('h2', { html: '<em>' + esc(ME.name) + '</em> 님,<br>안녕하세요' }),
+      h('p', null, [
+        document.createTextNode('학번 '), h('b', { text: ME.sid }),
+        document.createTextNode(' 로 들어왔어요. 아래 [시작하기] 를 누르거나 ← → 키로 넘기세요.')
+      ]),
+      h('div', { class: 'row', style: 'margin-bottom:10px' }, [
+        h('button', { class: 'btn green big', type: 'button', onclick: next }, '시작하기 →')
+      ]),
+      h('div', { class: 'row' }, [
+        h('button', { class: 'btn small', type: 'button', onclick: reloadMine }, '제출한 답 다시 불러오기'),
+        h('button', { class: 'btn small', type: 'button', onclick: openChangePw }, '비밀번호 바꾸기'),
+        h('span', { class: 's-msg', id: 'gateMsg' })
+      ]),
+      h('p', { class: 'small muted', style: 'margin:12px 0 0' },
+        '적은 내용은 이 탭이 열려 있는 동안만 저장돼요. 다 하면 꼭 [제출하기] 를 눌러 주세요. ' +
+        '공용 컴퓨터라면 끝내고 오른쪽 위 [나가기] 를 누르세요.')
+    ]);
+    if (gate.msg) { gateMsg(gate.msg, 'ok'); gate.msg = ''; }
+    return;
+  }
+
+  /* 1단계 — 학번 */
+  if (gate.step === 'id') {
+    var f = gateField('학번', 'text', '예: 20315', goNext);
+    f.input.value = gate.sid;
+    f.input.setAttribute('inputmode', 'numeric');
+    function goNext() {
+      var sid = f.input.value.replace(/\s/g, '');
+      if (!/^[0-9]{4,5}$/.test(sid)) return gateMsg('학번은 숫자 4~5자리로 적어 주세요.');
+      gate.sid = sid;
+      gateMsg('확인하는 중…', '');
+      call('apiLookup', sid).then(function (j) {
+        if (!j || !j.ok) return gateMsg((j && j.msg) || '확인하지 못했어요.');
+        gate.step = j.state === 'known' ? 'pw' : j.state === 'reset' ? 'reset' : 'new';
+        gate.masked = j.masked || '';
+        renderGate(document.getElementById('gateCol'));
+      }).catch(function () { gateMsg('서버에 이어지지 않았어요. 잠시 뒤 다시 해 주세요.'); });
+    }
+    fill(col, [
+      h('h2', { html: '광고비와 <em>매출</em> 사이의<br>관계 알아보기' }),
+      h('p', null, '먼저 학번을 적어 주세요. 처음이면 이름과 비밀번호를 정하게 됩니다.'),
+      h('div', { class: 'gate-box' }, [
+        f.wrap,
+        h('div', { class: 'row', style: 'margin-top:10px' }, [
+          h('button', { class: 'btn primary', type: 'button', onclick: goNext }, '다음 →'),
+          h('span', { class: 's-msg', id: 'gateMsg' })
+        ])
+      ])
+    ]);
+    if (gate.msg) { gateMsg(gate.msg); gate.msg = ''; }
+    setTimeout(function () { f.input.focus(); }, 0);
+    return;
+  }
+
+  /* 2단계 — 비밀번호로 들어오기 */
+  if (gate.step === 'pw') {
+    var p = gateField('비밀번호', 'password', '', doLogin);
+    function doLogin() {
+      var pw = p.input.value;
+      if (!pw) return gateMsg('비밀번호를 적어 주세요.');
+      gateMsg('들어가는 중…', '');
+      call('apiLogin', gate.sid, pw).then(function (j) {
+        if (!j || !j.ok) {
+          if (j && j.state) { gate.step = j.state === 'reset' ? 'reset' : 'new'; renderGate(document.getElementById('gateCol')); }
+          return gateMsg((j && j.msg) || '들어가지 못했어요.');
+        }
+        afterLogin(j);
+      }).catch(function () { gateMsg('서버에 이어지지 않았어요.'); });
+    }
+    fill(col, [
+      h('h2', { html: '<em>' + esc(gate.masked || '') + '</em> 님,<br>다시 오셨네요' }),
+      h('p', null, [
+        document.createTextNode('학번 '), h('b', { text: gate.sid }),
+        document.createTextNode(' · 비밀번호를 적어 주세요.')
+      ]),
+      h('div', { class: 'gate-box' }, [
+        p.wrap,
+        h('div', { class: 'row', style: 'margin-top:10px' }, [
+          h('button', { class: 'btn primary', type: 'button', onclick: doLogin }, '들어가기'),
+          h('button', { class: 'btn small', type: 'button', onclick: backToId }, '학번 다시 적기'),
+          h('span', { class: 's-msg', id: 'gateMsg' })
+        ]),
+        h('p', { class: 'small muted', style: 'margin:10px 0 0' },
+          '비밀번호가 기억나지 않으면 선생님께 말씀해 주세요. 초기화해 주시면 새로 정할 수 있어요. ' +
+          '(적어 둔 답은 그대로 남습니다)')
+      ])
+    ]);
+    if (gate.msg) { gateMsg(gate.msg); gate.msg = ''; }
+    setTimeout(function () { p.input.focus(); }, 0);
+    return;
+  }
+
+  /* 2단계 — 처음 오는 학생이 이름과 비밀번호를 **정한다** (초기화된 학생도 여기로 온다) */
+  var isReset = gate.step === 'reset';
+  var nameF = gateField('이름', 'text', '예: 홍길동', doRegister);
+  var pw1 = gateField(isReset ? '새 비밀번호' : '비밀번호', 'password', '네 글자 이상', doRegister);
+  var pw2 = gateField('비밀번호 확인', 'password', '한 번 더', doRegister);
+
+  function doRegister() {
+    var name = nameF.input.value.replace(/\s+/g, '');
+    var a = pw1.input.value, b = pw2.input.value;
+    if (name.length < 2) return gateMsg('이름을 두 글자 이상 적어 주세요.');
+    if (a.length < 4) return gateMsg('비밀번호는 네 글자 이상으로 정해 주세요.');
+    if (a !== b) return gateMsg('두 비밀번호가 서로 다릅니다. 다시 적어 주세요.');
+    gateMsg('만드는 중…', '');
+    call('apiRegister', gate.sid, name, a).then(function (j) {
+      if (!j || !j.ok) {
+        if (j && j.state === 'known') { gate.step = 'pw'; renderGate(document.getElementById('gateCol')); }
+        return gateMsg((j && j.msg) || '만들지 못했어요.');
+      }
+      afterLogin(j);
+    }).catch(function () { gateMsg('서버에 이어지지 않았어요.'); });
+  }
+
+  fill(col, [
+    h('h2', { html: isReset ? '비밀번호를<br><em>새로 정해</em> 주세요' : '<em>처음</em>이네요,<br>반가워요!' }),
+    h('p', null, isReset
+      ? ['학번 ', h('b', { text: gate.sid }), ' · ' + (gate.masked ? gate.masked + ' 님. ' : '') +
+         '선생님이 비밀번호를 초기화하셨어요. 이름을 확인하고 새 비밀번호를 정해 주세요.']
+      : ['학번 ', h('b', { text: gate.sid }), ' · 이름과 비밀번호를 정해 주세요. ' +
+         '다음 시간에는 이 비밀번호로 들어와 이어서 씁니다.']),
+    h('div', { class: 'gate-box' }, [
+      h('div', { class: 'gate-grid' }, [nameF.wrap, pw1.wrap, pw2.wrap]),
+      h('div', { class: 'row', style: 'margin-top:10px' }, [
+        h('button', { class: 'btn primary', type: 'button', onclick: doRegister }, isReset ? '새로 정하기' : '시작하기'),
+        h('button', { class: 'btn small', type: 'button', onclick: backToId }, '학번 다시 적기'),
+        h('span', { class: 's-msg', id: 'gateMsg' })
+      ]),
+      h('p', { class: 'small muted', style: 'margin:10px 0 0' },
+        '비밀번호는 암호로 바꾸어 저장되어 선생님도 볼 수 없어요. 잊으면 선생님께 초기화를 부탁하세요.')
+    ])
+  ]);
+  if (gate.msg) { gateMsg(gate.msg); gate.msg = ''; }
+  setTimeout(function () { nameF.input.focus(); }, 0);
+}
+
+function backToId() {
+  gate.step = 'id'; gate.masked = ''; gate.msg = '';
+  renderGate(document.getElementById('gateCol'));
+}
+
+/** 들어온 뒤 — 제출해 둔 답이 있으면 자동으로 되살린다 */
+function afterLogin(j) {
+  setMe({ token: j.token, sid: j.sid, name: j.name });
+  gate.step = 'id'; gate.sid = ''; gate.masked = '';
+  state = {};
+  save();
+  draw();
+  gateMsg('불러오는 중…', '');
+  pullMine(true);
+}
+
+/** 제출해 둔 답과 캡처를 가져온다 */
+function pullMine(quiet) {
+  if (!ME) return;
+  call('apiLoadMine', ME.token).then(function (j) {
+    if (expired_(j)) return;
+    if (!j || !j.ok) {
+      gateMsg(quiet ? '' : '아직 제출한 답이 없어요.', 'ok');
+      return;
+    }
+    state = {};
+    Object.keys(j.data || {}).forEach(function (k) { state[k] = j.data[k]; });
+    save();
+    rememberSent(j.updatedAt || Date.now());
+    lastDraft = draftSnap();     // 방금 서버에서 가져온 값이니 되보낼 까닭이 없다
+    draw();
+    var when = j.updatedAt
+      ? new Date(j.updatedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : '';
+    gateMsg('✓ ' + when + '에 제출한 답을 불러왔어요.', 'ok');
+
+    /* 캡처는 드라이브에 있으므로 한 장씩 받아 온다 */
+    var files = j.imgFiles || {};
+    Object.keys(files).forEach(function (k) {
+      call('apiMyImage', ME.token, files[k]).then(function (r) {
+        if (r && r.ok) {
+          state[k] = r.dataUrl;
+          sentImgs[k] = r.dataUrl;
+          try { sessionStorage.setItem(KEY + '-simg', JSON.stringify(sentImgs)); } catch (e) {}
+          save();
+          rememberSent(j.updatedAt || Date.now());
+          renderShots(); showSent();
+        }
+      }).catch(function () {});
+    });
+  }).catch(function () { gateMsg(quiet ? '' : '불러오지 못했어요.'); });
+}
+
+/** 표지의 [제출한 답 다시 불러오기] — 지금 적은 것이 지워지므로 한 번 묻는다 */
+function reloadMine() {
+  var hasWork = Object.keys(state).some(function (k) { return String(state[k] || '').trim() !== ''; });
+  if (!hasWork) return pullMine(false);
+  ask('지금 적은 답이 바뀌어요',
+    '제출해 둔 답을 불러오면 <b>지금 이 화면에 적은 내용이 모두 지워집니다.</b> 그래도 불러올까요?',
+    '불러오기', function () { pullMine(false); });
+}
+
+/** 비밀번호 바꾸기 — 한 창에서 세 칸 */
+function openChangePw() {
+  var oldF = gateField('지금 비밀번호', 'password', '', function () {});
+  var newF = gateField('새 비밀번호', 'password', '네 글자 이상', function () {});
+  var chkF = gateField('새 비밀번호 확인', 'password', '한 번 더', function () {});
+  var msg = h('p', { class: 'check', style: 'min-height:1.4em' });
+  var box = openSheet('비밀번호 바꾸기', [
+    h('div', { class: 'gate-grid' }, [oldF.wrap, newF.wrap, chkF.wrap]), msg
+  ], [], { maxWidth: '640px' });
+  fill(box.sheet.querySelector('.sheet-foot'), [
+    h('button', { class: 'btn primary', type: 'button', onclick: function () {
+      if (newF.input.value !== chkF.input.value) {
+        msg.textContent = '새 비밀번호 두 칸이 서로 다릅니다.'; msg.className = 'check warn'; return;
+      }
+      msg.textContent = '바꾸는 중…'; msg.className = 'check';
+      call('apiChangePw', ME.token, oldF.input.value, newF.input.value).then(function (j) {
+        if (expired_(j)) { closeVeil(); return; }
+        if (!j || !j.ok) { msg.textContent = (j && j.msg) || '바꾸지 못했어요.'; msg.className = 'check warn'; return; }
+        closeVeil();
+        gate.msg = '✓ 비밀번호를 바꿨어요.';
+        renderGate(document.getElementById('gateCol'));
+      }).catch(function () { msg.textContent = '서버에 이어지지 않았어요.'; msg.className = 'check warn'; });
+    } }, '바꾸기'),
+    h('button', { class: 'btn', type: 'button', onclick: closeVeil }, '그만두기')
+  ]);
+  setTimeout(function () { oldF.input.focus(); }, 0);
+}
+
+/** 나가기 — 공용 컴퓨터에서 다음 학생에게 앞 학생 답이 보이지 않게 */
+function logout() {
+  ask('나가기',
+    '이 컴퓨터에서 <b>적어 둔 답과 로그인이 모두 지워집니다.</b> 제출하지 않은 내용은 사라져요. 나갈까요?',
+    '나가기', function () {
+      var token = ME ? ME.token : '';
+      setMe(null);
+      state = {};
+      sent = null; sentImgs = {};
+      try {
+        sessionStorage.removeItem(KEY);
+        sessionStorage.removeItem(KEY + '-sent');
+        sessionStorage.removeItem(KEY + '-simg');
+        sessionStorage.removeItem(KEY + '-at');
+      } catch (e) {}
+      if (token) call('apiLogout', token).catch(function () {});
+      go(0);
+    });
+}
+
+
+/* ── 제출 ── */
+function sMsg(t, cls) {
+  var el = document.getElementById('submitMsg');
+  if (el) { el.textContent = t || ''; el.className = 's-msg ' + (cls || ''); }
+}
+/** 머리의 제출 단추에 지금 상태를 보여 준다 */
+function showSent() {
+  var btn = document.getElementById('topSubmit');
+  if (!ONLINE || !ME) { sMsg(''); return; }
+  if (!sent) {
+    if (btn) { btn.textContent = '제출하기'; btn.className = 'head-btn go'; }
+    sMsg('');
+    return;
+  }
+  var t = new Date(sent.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  if (isSentNow()) {
+    if (btn) { btn.textContent = '✓ 제출됨'; btn.className = 'head-btn go ok'; }
+    sMsg('✓ ' + t + '에 제출했어요.', 'ok');
+  } else {
+    if (btn) { btn.textContent = '다시 제출'; btn.className = 'head-btn go warn'; }
+    sMsg(t + '에 제출한 뒤 고친 내용이 있어요. 다시 제출해 주세요.', 'warn');
+  }
+}
+
+var submitting = false;
+/* ── 작성 중 저장 (선생님이 진행 상황을 볼 수 있게) ─────────────────────────
+   2026-10-26 사용자 지시. 예전에는 [제출하기] 를 누르기 전까지 서버에 아무것도 가지 않아
+   선생님 화면에 **제출한 학생만** 보였다. 이제 학생이 칸을 고치면 조금 뒤 조용히 보낸다.
+
+   ⚠⚠ **제출이 아니다.** `apiSaveDraft` 는 제출 시각을 건드리지 않고 상태를 「작성 중」으로 둔다.
+     학생 화면에도 「제출했다」고 말하지 않는다 — 그러면 안 내고 끝내는 학생이 생긴다.
+   ⚠ **값이 바뀐 학생만 보낸다**(`lastDraft` 와 글자로 대조). 서른 명이 가만히 있는데도
+     30초마다 쓰면 앱스 스크립트 실행 횟수와 LockService 대기가 헛되이 는다.
+   ⚠ 캡처는 보내지 않는다 — 드라이브에 1MB 그림을 30초마다 올릴 수는 없다.
+     캡처는 [제출하기] 때만 올라간다. */
+var DRAFT_WAIT = 30000;        // 마지막으로 고친 뒤 이만큼 조용하면 보낸다
+var draftTimer = null;
+var draftBusy = false;
+var lastDraft = null;          // 저번에 보낸 답의 JSON — 같으면 보내지 않는다
+
+/** 답 한 벌을 글자로 — 보낼 값과 견줄 때 쓴다 (캡처는 뺀다) */
+function draftSnap() {
+  var d = {};
+  FIELDS.forEach(function (f) { d[f[0]] = state[f[0]] === undefined ? '' : state[f[0]]; });
+  return JSON.stringify(d);
+}
+
+/** 칸이 바뀔 때마다 불린다 — 타이머만 다시 걸고 끝낸다 */
+function draftSoon() {
+  if (!ONLINE || !ME) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(sendDraft, DRAFT_WAIT);
+}
+
+function sendDraft() {
+  if (!ONLINE || !ME || draftBusy || submitting) return;
+  var snap = draftSnap();
+  if (snap === lastDraft) return;              // 바뀐 것이 없으면 보내지 않는다
+  draftBusy = true;
+  var data = JSON.parse(snap);
+  call('apiSaveDraft', ME.token, { clientId: clientId(), data: data })
+    .then(function (j) {
+      if (j && j.ok) lastDraft = snap;         // 보낸 뒤에만 기억한다 — 실패하면 다음에 다시 보낸다
+    })
+    .catch(function () { /* 조용히 넘어간다 — 학생을 놀라게 하지 않는다 */ })
+    .then(function () { draftBusy = false; });
+}
+
+/* 탭을 닫거나 숨길 때 마지막으로 한 번 더 — 수업이 끝나 그냥 닫는 학생이 많다 */
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) { clearTimeout(draftTimer); sendDraft(); }
+});
+
+function submitAll() {
+  if (submitting) return;
+  if (!ONLINE) {
+    return say('제출할 수 없어요',
+      '이 화면은 서버에 이어져 있지 않습니다. 선생님이 알려 준 주소로 다시 열어 주세요.');
+  }
+  if (!ME) return kickOut('먼저 학번과 비밀번호로 들어와 주세요.');
+
+  submitting = true;
+  var btns = [document.getElementById('topSubmit'), document.getElementById('submitBtn')];
+  btns.forEach(function (b) { if (b) b.disabled = true; });
+  sMsg('제출하는 중…');
+
+  var data = {};
+  FIELDS.forEach(function (f) { data[f[0]] = state[f[0]] === undefined ? '' : state[f[0]]; });
+
+  /* 캡처: 저번에 보낸 것과 똑같으면 'keep' — 드라이브에 같은 그림을 또 올리지 않는다 */
+  var imgs = {};
+  IMG_KEYS.forEach(function (p) {
+    var k = p[0], now = state[k] || '';
+    imgs[k] = (sent && now && now === (sentImgs[k] || '')) ? 'keep' : now;
+  });
+
+  call('apiSubmit', ME.token, { clientId: clientId(), data: data, imgs: imgs })
+    .then(function (j) {
+      if (expired_(j)) return;
+      if (!j || !j.ok) throw new Error((j && j.msg) || 'fail');
+      rememberSent(j.at || Date.now());
+      lastDraft = draftSnap();       // 방금 보낸 값이니 작성 중 저장이 또 갈 까닭이 없다
+      clearTimeout(draftTimer);
+      draw();
+      sMsg('✓ 선생님께 제출했어요.', 'ok');
+    })
+    .catch(function () {
+      sMsg('제출하지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.', 'warn');
+    })
+    .then(function () {
+      submitting = false;
+      btns.forEach(function (b) { if (b) b.disabled = false; });
+    });
+}
+
+/** 이 브라우저를 가리키는 무작위 번호 — 개인정보가 아니다 */
+function clientId() {
+  var k = KEY + '-cid', id = null;
+  try { id = localStorage.getItem(k); } catch (e) {}
+  if (!id) {
+    var b = new Uint8Array(12);
+    if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(b);
+    else for (var i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+    id = Array.prototype.map.call(b, function (x) { return x.toString(16).padStart(2, '0'); }).join('');
+    try { localStorage.setItem(k, id); } catch (e) {}
+  }
+  return id;
+}
+
+
+/* ── 시작 ── */
+function startStudent() {
+  buildStage();
+  var saved = 0;
+  try { saved = Number(sessionStorage.getItem(KEY + '-at') || 0) || 0; } catch (e) {}
+  at = ME ? Math.max(0, Math.min(CARDS.length - 1, saved)) : 0;
+  draw();
+  document.onkeydown = keyNav;
+
+  /* 제출하지 않은 답이 있으면 탭을 닫기 전에 한 번 묻는다 */
+  window.addEventListener('beforeunload', function (e) {
+    var filled = Object.keys(state).some(function (k) { return String(state[k] || '').trim() !== ''; });
+    if (filled && !isSentNow()) { e.preventDefault(); e.returnValue = ''; }
+  });
+}
+
+getParams().then(function (p) {
+  if ((p.page || PAGE_HINT) === 'teacher') startTeacher();
+  else startStudent();
+});
+</script>

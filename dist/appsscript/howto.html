@@ -1,0 +1,84 @@
+<!-- 오렌지3 안내 — © 2026 티쳐무 · 모든 권리 보유
+     STEP 마다 「오렌지3에서 이렇게 해 보세요」 를 한 걸음 = 한 장으로 나눠 둔다.
+     ⚠ 스크롤을 없애려고 접이식 상자를 버리고 겹쳐 뜨는 슬라이드로 바꾼 것이다 —
+       한 장에 들어가지 않을 만큼 글을 늘리지 말 것(안내 슬라이드는 스크롤이 없다).
+     ⚠ shots 의 열쇠는 shots.html 의 SHOTS 에 있어야 한다. 시험이 대조한다.
+
+     2026-10-26 — 사용자가 준 흐름도 두 장에 맞춰 다시 썼다.
+       평가 지표는 **Test and Score**(학습 데이터로 직접 평가), 회귀계수는
+       **Linear Regression → Data Table(회귀 계수 Coefficients)** 로 읽는다.
+       세 STEP 이 **같은 흐름 하나**를 조금씩 고쳐 쓰므로 학생이 새로 배울 것이 적다 —
+         STEP 3 Features 에 한 개씩 (매체를 바꿔 가며 세 번) · 심화로 Data Table 을 붙인다
+         STEP 4 Features 에 세 개 모두 (흐름은 그대로)
+     2026-10-26 — STEP 5(Data Sampler + Predictions 로 남은 30% 평가)는 **다음 차시 앱**
+       (regression-ml-pract)으로 옮겼다. 이 앱은 Test and Score 하나만 쓴다. -->
+<script>
+/* HOWTO[STEP 번호] = [{ html: 할 일, shots: [{ k: 그림 열쇠, cap: 설명 }], note: 💡 }] */
+var HOWTO = {
+  1: [
+    { html: '<span class="w">File</span> 위젯으로 <b>advertising.csv</b> 파일을 엽니다.' },
+    { html: 'File 위젯 위쪽의 정보에서 <b>데이터 개수(instances)</b>와 <b>속성 개수(features)</b>를 확인합니다.' },
+    { html: '<span class="w">Data Table</span> 위젯을 연결해 실제 값을 살펴봅니다.',
+      shots: [{ k: 's1_table', cap: 'File 위젯에 Data Table 위젯 연결하기' }] },
+    { html: '예측하고 싶은 속성의 Role을 <b>target</b>으로 바꿉니다.' }
+  ],
+  2: [
+    { html: '<span class="w">File</span> 위젯에 <span class="w">Scatter Plot</span>(산점도) 위젯을 연결합니다.',
+      shots: [{ k: 's2_link', cap: 'File 위젯에 Scatter Plot 위젯 연결하기' }] },
+    { html: '산점도 창 왼쪽 위 <b>Axes</b>에서 <b>X축</b>을 <b>TV</b>로, <b>Y축</b>을 <b>Sales</b>로 정합니다.' },
+    { html: '왼쪽 아래 <b>회귀선 표시</b>에 체크하면 그래프에 회귀선과 <b>상관계수 r</b> 값(선 옆의 작은 글씨)이 나타납니다.',
+      shots: [{ k: 's2_scatter', cap: 'X축 TV, Y축 Sales로 정하고 ‘회귀선 표시’에 체크한 화면 (r 값은 가려 두었어요)' }] },
+    { html: '점들이 오른쪽 위로 올라가는지(양), 오른쪽 아래로 내려가는지(음) 모양도 함께 살펴봅니다.' },
+    { html: 'X축을 <b>Radio</b>, <b>Newspaper</b>로 바꿔 가며 같은 방법으로 값을 읽습니다.',
+      note: 'r 앞에 <b>−</b>가 붙어 있는지 꼭 확인하세요.' }
+  ],
+  3: [
+    /* 2026-10-26 사용자 지시 — 옛 (1) File 열기와 (2) 열 선택 연결을 한 장으로 합쳤다.
+       「Target 은 Sales 로 고정, 독립 변수만 바꿔 가며」가 이 STEP 의 요령이다. */
+    { html: '<span class="w">File</span>에 <span class="w">Select Columns</span>(열 선택)를 <b>1개</b> 연결합니다. ' +
+        '이 위젯 하나에서 <b>종속 변수(Target)은 Sales로 고정</b>하고, ' +
+        '독립 변수를 <b>바꿔 가며</b> 모델 3개를 차례로 만들어요.',
+      shots: [{ k: 's3_select', cap: '열 선택 — Target에 Sales를 두고, Features에 한 번에 한 매체만 둔다 (나머지는 제외된 변수)' }] },
+    { html: '<span class="w">Select Columns</span> → <span class="w">Test and Score</span>(모델 검증 및 평가)를 ' +
+        '연결하고(데이터), <span class="w">Linear Regression</span>(선형회귀) → Test and Score 도 ' +
+        '연결합니다(학습 알고리즘).',
+      shots: [{ k: 's3_wire', cap: '연결 모습 — 파일 불러오기 → 열 선택 → 모델 검증 및 평가, 선형회귀 → 모델 검증 및 평가' }],
+      note: 'Test and Score에는 <b>데이터</b>와 <b>학습 알고리즘</b>이 둘 다 들어와야 결과가 나옵니다. 학습과 평가는 Test and Score가 합니다.' },
+    { html: 'Test and Score를 열고 왼쪽에서 <b>학습 데이터로 직접 평가 (Test on train data)</b>를 고릅니다. ' +
+        '상태 표시줄에 데이터가 <b>200</b>개로 나오는지 확인하고, <b>MSE, RMSE, MAE, MAPE, R2</b>를 읽습니다.',
+      shots: [{ k: 's3_score', box: [78, 477, 214, 25],
+        cap: '빨간 네모가 상태 표시줄 — 들어온 데이터가 200개인지 여기서 확인합니다 (결과 값은 가려 두었어요)' }] },
+    { html: 'Select Columns를 열어 <b>Features</b>(특성)에 <b>TV만</b> 남기고 나머지 두 속성은 ' +
+        '<b>제외된 변수 (Ignored)</b>로 옮깁니다. 나온 값을 표의 <b>TV</b> 줄에 적습니다.',
+      note: '숫자가 잘려 보이면 표의 열 경계를 끌어 넓혀 보세요.' },
+    { html: '다시 Select Columns를 열어 TV를 제외된 변수로 옮기고 <b>Radio</b>를 Features로 옮깁니다. ' +
+        '바뀐 결과를 <b>Radio</b> 줄에 적습니다. 같은 방법으로 <b>Newspaper</b>도 합니다.',
+      note: 'Features에는 <b>항상 하나만</b> 있어야 단순 선형 회귀예요. 결과가 안 바뀌면 Select Columns 아래 <b>자동 전송 (Send Automatically)</b>에 체크되어 있는지 확인하세요.' },
+    { html: '<b>[심화]</b> 회귀식까지 보려면 <span class="w">Select Columns</span> → ' +
+        '<span class="w">Linear Regression</span> 을 <b>데이터</b>로 한 번 더 잇고, ' +
+        '<span class="w">Linear Regression</span> → <span class="w">Data Table</span> 을 연결한 뒤 ' +
+        '연결선을 더블클릭해 <b>회귀 계수 (Coefficients) → 데이터</b>로 바꿉니다.',
+      shots: [{ k: 's3_coef', cap: '심화 — 선형회귀에 데이터를 잇고, 선형회귀 → 데이터 테이블 (1) 을 회귀 계수로 이은 모습' }],
+      note: 'Data Table을 열면 <b>intercept</b>(절편)와 그 매체의 <b>회귀계수</b>가 나옵니다. 매체를 바꿀 때마다 값도 바뀌어요.' }
+  ],
+  4: [
+    { html: 'STEP 3에서 만든 흐름을 그대로 씁니다. <span class="w">Select Columns</span>(열 선택)를 열어 ' +
+        '이번에는 <b>TV · Radio · Newspaper 셋 다</b> <b>Features</b>에 두고, <b>Target</b>에 Sales를 둡니다.',
+      note: '독립 변수를 여러 개 쓰는 것이 <b>다중</b> 선형 회귀예요. 제외된 변수 칸은 비워 둡니다.' },
+    { html: '<span class="w">Test and Score</span>에서 <b>학습 데이터로 직접 평가</b>를 그대로 두고 ' +
+        '<b>MSE, RMSE, MAE, MAPE, R2</b>를 읽어 <b>STEP 4 · 다중</b> 줄에 적습니다. ' +
+        '위의 회색 줄(STEP 3)과 견주어 보세요.',
+      shots: [{ k: 's3_score', cap: 'Test and Score — 독립 변수만 바뀌었을 뿐, 보는 곳은 STEP 3과 같다' }] },
+    { html: '<b>[심화]</b> STEP 3 심화와 같은 방법입니다. <span class="w">Linear Regression</span> → ' +
+        '<span class="w">Data Table</span> 을 <b>회귀 계수 (Coefficients) → 데이터</b>로 이어 ' +
+        '<b>회귀계수</b>와 <b>절편(intercept)</b>을 읽습니다. (이미 이어 두었다면 그대로 쓰면 됩니다.)',
+      shots: [{ k: 's3_coef', cap: '선형회귀 → 데이터 테이블 (1) 을 회귀 계수로 이은 모습' }],
+      note: '이번에는 <b>intercept</b> 한 줄과 <b>TV · Radio · Newspaper 세 줄</b>이 함께 나옵니다. ' +
+        '같은 매체인데 STEP 3과 값이 다른 것도 살펴보세요.' },
+    { html: '회귀계수를 학습지에 적으면 <b>회귀식이 저절로 조립</b>되어 보입니다. ' +
+        '어느 매체의 계수가 가장 큰지 살펴보세요.',
+      note: '여기까지는 <b>학습에 쓴 데이터로 그대로</b> 평가한 것이라 점수가 좋게 나옵니다. ' +
+        '배우지 않은 데이터로 재면 어떻게 될지는 <b>다음 차시</b>(기계학습 기반 회귀 분석)에서 따져 봐요.' }
+  ],
+};
+</script>

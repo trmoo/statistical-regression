@@ -1,0 +1,640 @@
+<!-- 화면 부품 — © 2026 티쳐무 · 모든 권리 보유
+     무대 맞추기 · 카드 넘기기 · 답 저장 · 입력 칸 · 스스로 점검 · 겹쳐 뜨는 창.
+     ⚠ 카드를 넘길 때마다 본문을 통째로 다시 그린다. 입력 칸은 만들 때 state 에서 값을 읽어
+       채우므로 따로 fill( ) 하지 않는다.
+     ⚠ 카드 안에서 window.addEventListener('resize', …) 나 setInterval 을 직접 쓰지 말 것
+       — 카드를 넘겨도 살아남아 쌓인다. 무대는 한 번만 resize 를 건다.
+     ⚠ 브라우저 기본 alert·confirm·prompt 를 쓰지 말 것 — 앱스 스크립트 웹 앱은
+       「…googleusercontent.com 에 삽입된 페이지 내용:」 이라는 주소를 학생에게 보여 준다.
+       say( ) · ask( ) 를 쓴다. -->
+<script>
+var W = 1280, H = 720;
+
+/* ── 작은 도우미 ── */
+function h(tag, attrs, children) {
+  var el = document.createElement(tag);
+  if (attrs) {
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'html') el.innerHTML = v;
+      else if (k === 'text') el.textContent = v;
+      else if (k.slice(0, 2) === 'on') el[k.toLowerCase()] = v;
+      else if (k === 'dataset') Object.keys(v).forEach(function (d) { el.dataset[d] = v[d]; });
+      else el.setAttribute(k, v === true ? '' : v);
+    });
+  }
+  (Array.isArray(children) ? children : children ? [children] : []).forEach(function (c) {
+    if (c === null || c === undefined || c === false) return;
+    el.appendChild(typeof c === 'object' ? c : document.createTextNode(String(c)));
+  });
+  return el;
+}
+function fill(el, kids) {
+  el.textContent = '';
+  (Array.isArray(kids) ? kids : [kids]).forEach(function (k) { if (k) el.appendChild(k); });
+  return el;
+}
+function esc(v) {
+  return String(v === null || v === undefined ? '' : v)
+    .replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+}
+/* 속성 칩 — 매체마다 색이 다르다 */
+function attr(name) { return h('span', { class: 'attr a-' + name, text: name }); }
+
+/* ── 답 저장 (탭이 열려 있는 동안만) ──
+   공용 컴퓨터를 생각해 sessionStorage 에만 둔다 — 탭을 닫으면 지워진다. */
+var KEY = 'ad-sales-worksheet-v2';
+var state = {};
+try {
+  localStorage.removeItem('ad-sales-worksheet-v1');        // 예전 판이 남긴 영구 저장 지우기
+  localStorage.removeItem('ad-sales-worksheet-v1-sent');
+} catch (e) {}
+try { state = JSON.parse(sessionStorage.getItem(KEY) || '{}') || {}; } catch (e) { state = {}; }
+
+var saveTimer = null;
+function save() {
+  try { sessionStorage.setItem(KEY, JSON.stringify(state)); return true; } catch (e) { return false; }
+}
+function saveSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 300);
+  /* 선생님 화면에 진행 상황이 보이도록 조금 뒤 서버에도 조용히 보낸다 (boot.html 의 draftSoon).
+     ⚠ boot.html 은 이 파일보다 **뒤에** 끼워지므로, 로그인 전에는 아직 없을 수 있다. */
+  if (typeof draftSoon === 'function') draftSoon();
+}
+
+/* 서버가 지금 들고 있는 답·캡처 — 「고친 내용이 있어요」 와 캡처 'keep' 판단에 쓴다 */
+var sent = null;                       // { at: 시각, snap: JSON } 또는 null
+var sentImgs = {};                     // { img3: 그때 보낸 data URL }
+try { sent = JSON.parse(sessionStorage.getItem(KEY + '-sent') || 'null'); } catch (e) {}
+try { sentImgs = JSON.parse(sessionStorage.getItem(KEY + '-simg') || '{}') || {}; } catch (e) {}
+function rememberSent(at) {
+  sent = { at: at || Date.now(), snap: JSON.stringify(state) };
+  sentImgs = {};
+  IMG_KEYS.forEach(function (p) { sentImgs[p[0]] = state[p[0]] || ''; });
+  try {
+    sessionStorage.setItem(KEY + '-sent', JSON.stringify(sent));
+    sessionStorage.setItem(KEY + '-simg', JSON.stringify(sentImgs));
+  } catch (e) {}
+}
+function isSentNow() { return !!sent && sent.snap === JSON.stringify(state); }
+
+/* ── 무대 ── */
+var stage, cardHead, cardBody, cardFoot, holder;
+function buildStage() {
+  cardHead = h('header', { class: 'card-head' });
+  cardBody = h('main', { class: 'card-body' });
+  cardFoot = h('footer', { class: 'card-foot' });
+  stage = h('div', { class: 'stage' }, [cardHead, cardBody, cardFoot]);
+  holder = h('div', { class: 'stage-holder' }, stage);
+  document.body.appendChild(holder);
+  /* 창에 맞춰 무대 판을 고른다.
+     넓은 창   1280×720 (지금까지 쓰던 판)
+     좁은 창    880×1040 — 화면을 반반 나눠 오렌지3 와 나란히 볼 때.
+       1280 판을 그대로 줄이면 글자가 같이 줄어 읽기 어렵고 위아래로 빈 띠만 남는다.
+       좁은 판은 두 칸 배치를 한 줄로 세우고(.stage.narrow), 남는 높이를 본문이 쓴다.
+     ⚠ 판을 바꾸면 모든 카드를 두 판에서 다시 재 볼 것 — 넘치면 잘린다. */
+  function fitStage() {
+    /* STAGE_PAD — 미리보기 띠처럼 아래를 차지하는 것이 있으면 그만큼 빼고 잰다 (미리보기 전용) */
+    var ww = window.innerWidth, wh = window.innerHeight - (window.STAGE_PAD || 0);
+    var narrow = ww < 1120 && wh > ww * 0.8;
+    var w = narrow ? 880 : 1280;
+    var hMin = narrow ? 1040 : 720;
+    var s = Math.min(ww / w, wh / hMin);
+    var h = Math.max(hMin, wh / s);        // 남는 높이는 본문이 쓴다
+    stage.classList.toggle('narrow', narrow);
+    stage.style.width = w + 'px';
+    stage.style.height = h + 'px';
+    stage.style.transform = 'scale(' + s + ')';
+    holder.style.width = (w * s) + 'px';
+    holder.style.height = (h * s) + 'px';
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+}
+
+/* ── 카드 ──
+   CARDS[i] = { id, ch: 묶음 번호, title, tag: 머리 꼬리표, step: STEP 번호(안내 단추용), render(body) } */
+var CARDS = [];
+function REG(card) { CARDS.push(card); return card; }
+
+/* ⚠ 묶음 번호 = STEP 번호다 (준비 0 · STEP 1~5 · 제출 6). chapterDone( ) 이 이것을 믿는다.
+   STEP 을 늘리거나 줄이면 이 목록만 고치면 된다 — 제출은 늘 마지막 번호다. */
+var CHAPTERS = [
+  { t: '준비', c: '#1f9d63' },
+  { t: 'STEP 1', c: '#2f80c4' },
+  { t: 'STEP 2', c: '#7c5cd6' },
+  { t: 'STEP 3', c: '#e5484d' },
+  { t: 'STEP 4', c: '#e8590c' },
+  { t: '제출', c: '#1f9d63' }
+];
+
+var at = 0;
+function go(i) {
+  at = Math.max(0, Math.min(CARDS.length - 1, i));
+  try { sessionStorage.setItem(KEY + '-at', String(at)); } catch (e) {}
+  draw();
+}
+function next() { go(at + 1); }
+function prev() { go(at - 1); }
+
+function draw() {
+  /* 로그인하지 않았으면 첫 화면에서 더 나아가지 못한다 */
+  var locked = ONLINE && !ME;
+  if (locked) at = 0;
+  var card = CARDS[at];
+
+  /* 머리 */
+  fill(cardHead, [
+    h('span', { class: 'ch-tag', html: card.tag || CHAPTERS[card.ch].t }),
+    h('h1', { text: card.title }),
+    h('div', { class: 'head-right' }, locked ? [] : [
+      card.step ? h('button', {
+        class: 'head-btn', type: 'button', onclick: function () { openGuide(card.step); }
+      }, '📖 오렌지3 안내') : null,
+      h('span', { class: 'me-chip', id: 'meChip' }),
+      ONLINE ? h('button', { class: 'head-btn go', type: 'button', id: 'topSubmit', onclick: submitAll }, '제출하기') : null,
+      ONLINE ? h('button', { class: 'head-btn', type: 'button', onclick: logout }, '나가기') : null
+    ])
+  ]);
+
+  /* 본문 */
+  cardBody.textContent = '';
+  card.render(cardBody);
+
+  /* 발 — 로그인 전에는 넘길 곳이 없으니 안내만 둔다 */
+  fill(cardFoot, locked ? [
+    h('span', { class: 's-msg', style: 'margin:0 auto' },
+      '학번과 비밀번호로 들어오면 학습지가 열려요.')
+  ] : [
+    h('button', { class: 'nav', type: 'button', disabled: at === 0, onclick: prev }, '← 이전'),
+    h('div', { class: 'chapters' }, CHAPTERS.map(function (c, ci) {
+      var first = CARDS.findIndex(function (x) { return x.ch === ci; });
+      return h('button', {
+        class: 'ch' + (card.ch === ci ? ' on' : '') + (chapterDone(ci) ? ' done' : ''),
+        type: 'button', onclick: function () { go(first); }
+      }, c.t);
+    })),
+    h('div', { class: 'dots' }, CARDS.filter(function (x) { return x.ch === card.ch; })
+      .map(function (x) { return h('i', { class: x.id === card.id ? 'on' : '' }); })),
+    h('button', { class: 'nav next', type: 'button', disabled: at === CARDS.length - 1, onclick: next }, '다음 →')
+  ]);
+
+  checkAll();
+  renderShots();
+  showMe();
+  showSent();
+}
+
+/* 그 묶음의 칸을 다 채웠는지 — 발의 알약을 초록으로 바꾼다 */
+function chapterDone(ci) {
+  if (ci === 0) return !!ME;
+  if (ci === CHAPTERS.length - 1) return isSentNow();
+  /* [심화] 칸은 빼고 센다 — 안 해도 되는 칸이다 */
+  var keys = FIELDS.filter(function (f) { return f[2] === ci && !f[4]; });
+  if (!keys.length) return false;
+  var shots = IMG_KEYS.filter(function (p) { return p[2] === ci; });
+  return keys.every(function (f) { return String(state[f[0]] || '').trim() !== ''; })
+    && shots.every(function (p) { return !!state[p[0]]; });
+}
+
+/* ── 입력 칸 ──
+   만들 때 state 에서 값을 읽어 채우고, 바뀌면 state 에 쓴다. */
+function onEdit(key, el) {
+  el.addEventListener('input', function () {
+    state[key] = el.value;
+    saveSoon(); checkAll(); showSent(); showMe();
+  });
+}
+function numIn(key, ph, opt) {
+  opt = opt || {};
+  var el = h('input', {
+    type: 'number', step: 'any', placeholder: ph || '', 'aria-label': opt.label || ph || key,
+    min: opt.min, max: opt.max
+  });
+  el.value = state[key] === undefined ? '' : state[key];
+  onEdit(key, el);
+  return el;
+}
+function textIn(key, ph, opt) {
+  opt = opt || {};
+  var el = h('input', { type: 'text', placeholder: ph || '', autocomplete: 'off', 'aria-label': opt.label || ph || key });
+  el.value = state[key] === undefined ? '' : state[key];
+  onEdit(key, el);
+  return el;
+}
+function areaIn(key, ph) {
+  var el = h('textarea', { placeholder: ph || '', 'aria-label': ph || key });
+  el.value = state[key] === undefined ? '' : state[key];
+  onEdit(key, el);
+  return el;
+}
+function selectIn(key, opts) {
+  var el = h('select', { 'aria-label': key }, [h('option', { value: '' }, '선택하세요')]
+    .concat(opts.map(function (o) { return h('option', { value: o }, o); })));
+  el.value = state[key] === undefined ? '' : state[key];
+  el.addEventListener('change', function () {
+    state[key] = el.value; saveSoon(); checkAll(); showSent(); showMe();
+  });
+  return el;
+}
+/** 알약 고르기 — values = [[저장값, 보일 글], …] */
+function pickIn(key, values, cls) {
+  return h('div', { class: 'pick ' + (cls || ''), role: 'radiogroup', 'aria-label': key },
+    values.map(function (v) {
+      var input = h('input', { type: 'radio', name: key, value: v[0] });
+      if (state[key] === v[0]) input.checked = true;
+      input.addEventListener('change', function () {
+        if (input.checked) { state[key] = v[0]; saveSoon(); checkAll(); showSent(); showMe(); }
+      });
+      return h('label', null, [input, h('span', null, v[1])]);
+    }));
+}
+/** 「(1) 제목」 줄 */
+function subT(n, title, note) {
+  return h('p', { class: 'sub-t' }, [
+    n ? h('span', { class: 'n', text: '(' + n + ')' }) : null,
+    h('span', { html: title }),
+    note ? h('small', { html: note }) : null
+  ]);
+}
+/** 스스로 점검 안내가 들어갈 자리 */
+function checkBox(id) { return h('div', { class: 'check', id: id }); }
+function tbl(cls, rows) {
+  return h('table', { class: cls || '' }, rows);
+}
+
+/* ── 스스로 점검 (정답을 알려 주지 않고 형식만 본다) ──
+   화면에 없는 안내 자리는 그냥 넘어간다. */
+function num(k) {
+  var v = state[k];
+  return v === undefined || v === '' || v === null ? null : Number(v);
+}
+function msg(id, text, cls) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'check ' + (text ? (cls || 'warn') : '');
+}
+
+function checkAll() {
+  /* STEP 1 — 종속 변수는 하나 */
+  var roles = ATTRS.map(function (a) { return state['role_' + a]; });
+  var deps = roles.filter(function (r) { return r === '종속'; }).length;
+  if (roles.every(Boolean) && deps !== 1) {
+    msg('roleCheck', '종속 변수(예측하려는 결과)는 하나만 고르는 것이 일반적이에요. 다시 생각해 보세요.');
+  } else if (roles.every(Boolean)) {
+    msg('roleCheck', '모든 속성을 정했어요.', 'ok');
+  } else msg('roleCheck', '');
+
+  /* STEP 2 — 범위와 부호 */
+  var notes = [];
+  XS.forEach(function (a) {
+    var r = num('r_' + a), s = state['sign_' + a];
+    if (r !== null && (r < -1 || r > 1)) { notes.push(a + ': 상관계수는 −1부터 1 사이의 값이에요.'); return; }
+    if (r !== null && s && r !== 0 && ((r > 0) !== (s === '양'))) {
+      notes.push(a + ': 상관계수의 부호(+, −)와 고른 방향이 서로 맞는지 확인해 보세요.');
+    }
+    var g = state['str_' + a], ar = r === null ? null : Math.abs(r);
+    if (ar !== null && g && g !== (ar >= 0.7 ? '강함' : ar >= 0.3 ? '보통' : '약함')) {
+      notes.push(a + ': |r| 값과 고른 정도가 기준에 맞는지 확인해 보세요.');
+    }
+  });
+  msg('corrCheck', notes.join(' '));
+  var bv = state.bestVar, br = num('bestR');
+  if (bv && br !== null && num('r_' + bv) !== null && Math.abs(num('r_' + bv) - br) > 1e-9) {
+    msg('bestCheck', '위 표에 적은 ' + bv + '의 상관계수와 값이 달라요.');
+  } else msg('bestCheck', '');
+
+  /* STEP 3 들어가는 화면 — r² 는 **앱이 셈해 채운다**(학생이 계산하지 않는다, 2026-10-26 사용자 지시).
+     다음 화면에서 적은 R² 와 맞아떨어지면 그 사실을 알려 준다. */
+  var hit = 0, both = 0, miss = 0;
+  XS.forEach(function (a) {
+    var r = num('r_' + a), r2 = num('sl_' + a + '_r2');
+    var cell = document.querySelector('[data-rsq="' + a + '"]');
+    if (cell) cell.textContent = r === null ? '–' : (r * r).toFixed(3);
+    if (r === null) miss++;
+    else if (r2 !== null) { both++; if (Math.abs(r * r - r2) <= 0.012) hit++; }
+  });
+  if (miss === XS.length) msg('rsqCheck', '');
+  else if (both && both === hit) {
+    msg('rsqCheck', 'r을 제곱한 값이 STEP 3에서 적은 R²와 같네요! 단순 회귀에서는 R² = r² 입니다.', 'ok');
+  } else if (both && hit < both) {
+    msg('rsqCheck', 'r을 제곱한 값과 STEP 3에 적은 R²가 어긋나요. 두 곳 가운데 하나를 잘못 옮겨 적었는지 확인해 보세요.');
+  } else msg('rsqCheck', '');
+
+  /* STEP 3 (2) — 단순 회귀 세 가지. RMSE = √MSE, R² ≤ 1, 오차 지표는 음수가 아님 */
+  var sl = [];
+  XS.forEach(function (a) {
+    var v = function (k) { return num('sl_' + a + '_' + k); };
+    if (['mse', 'rmse', 'mae', 'mape'].some(function (k) { return v(k) !== null && v(k) < 0; })) {
+      sl.push(a + ': 오차 지표는 0보다 작을 수 없어요.');
+    }
+    var mse = v('mse'), rmse = v('rmse');
+    if (mse !== null && rmse !== null && mse >= 0 && rmse >= 0 &&
+        Math.abs(Math.sqrt(mse) - rmse) / Math.max(rmse, 1e-9) > 0.02) {
+      sl.push(a + ': √MSE ≈ ' + Math.sqrt(mse).toFixed(3) + ' 이에요. MSE와 RMSE를 바르게 옮겨 적었는지 확인해 보세요.');
+    }
+    if (v('r2') !== null && v('r2') > 1) sl.push(a + ': R²는 1보다 클 수 없어요.');
+  });
+  msg('slCheck', sl.join(' '));
+
+  /* STEP 3 (2) [심화] — 회귀계수가 음수면 짚어 준다. 이 데이터는 셋 다 양수여야 한다. */
+  var sb = [];
+  XS.forEach(function (a) {
+    var b = num('sb_' + a);
+    if (b !== null && b < 0) {
+      sb.push(a + ': 상관관계가 양(+)인데 회귀계수가 음수예요. 부호를 다시 확인해 보세요.');
+    }
+  });
+  msg('sbCheck', sb.join(' '));
+  showSimpleEqn();
+
+  /* STEP 4 — 다중 선형 회귀. 회색 줄에 STEP 3 값을 옮겨 보여 준다 */
+  document.querySelectorAll('[data-ref]').forEach(function (td) {
+    var v = state[td.dataset.ref];
+    td.textContent = v === undefined || v === '' ? '–' : v;
+  });
+  var mr = [], rv = function (k) { return num('mr_' + k); };
+  if (['mse', 'rmse', 'mae', 'mape'].some(function (k) { return rv(k) !== null && rv(k) < 0; })) {
+    mr.push('오차 지표는 0보다 작을 수 없어요.');
+  }
+  if (rv('mse') !== null && rv('rmse') !== null && rv('mse') >= 0 && rv('rmse') >= 0 &&
+      Math.abs(Math.sqrt(rv('mse')) - rv('rmse')) / Math.max(rv('rmse'), 1e-9) > 0.02) {
+    mr.push('√MSE ≈ ' + Math.sqrt(rv('mse')).toFixed(3) + ' 이에요. MSE와 RMSE를 바르게 옮겨 적었는지 확인해 보세요.');
+  }
+  if (rv('r2') !== null && rv('r2') > 1) mr.push('R²는 1보다 클 수 없어요.');
+  msg('mrCheck', mr.join(' '));
+  showEqn();
+  showPlan1();
+
+}
+
+/** 단순 회귀 세 가지의 회귀식을 조립해 보여 준다 (STEP 3 심화) */
+function showSimpleEqn() {
+  var box = document.getElementById('eqn3');
+  if (!box) return;
+  var any = XS.some(function (a) { return num('sb0_' + a) !== null || num('sb_' + a) !== null; });
+  if (!any) {
+    fill(box, [h('p', { class: 'eqn empty' }, '절편과 회귀계수를 적으면 여기에 회귀식 세 개가 만들어져요.')]);
+    return;
+  }
+  fill(box, XS.map(function (a) {
+    var b0 = num('sb0_' + a), b = num('sb_' + a);
+    if (b0 === null && b === null) {
+      return h('p', { class: 'eqn empty' }, a + ' 모델 — 아직 적지 않았어요.');
+    }
+    var v = b === null ? '?' : (b < 0 ? '(' + b + ')' : b);
+    return h('p', { class: 'eqn' }, 'Sales = ' + (b0 === null ? '?' : b0) + ' + ' + v + ' × ' + a);
+  }));
+}
+
+/** STEP 3 에서 적은 1차 답을 STEP 4 화면에 옮겨 보여 준다 */
+function showPlan1() {
+  var el = document.getElementById('plan1');
+  if (!el) return;
+  var v = String(state.adPlan1 || '').trim();
+  el.textContent = v || '(STEP 3에서 아직 적지 않았어요)';
+  el.className = 'quote' + (v ? '' : ' empty');
+}
+
+/** 적은 회귀계수로 회귀식을 조립해 보여 준다 (STEP 4) */
+function showEqn() {
+  var el = document.getElementById('eqn');
+  if (!el) return;
+  var b0 = num('b0');
+  var parts = XS.map(function (a) {
+    var b = num('b_' + a);
+    return { a: a, b: b };
+  });
+  if (b0 === null && parts.every(function (p) { return p.b === null; })) {
+    el.textContent = '회귀계수와 절편을 적으면 여기에 회귀식이 만들어져요.';
+    el.className = 'eqn empty';
+    return;
+  }
+  var txt = 'Sales = ' + (b0 === null ? '?' : b0);
+  parts.forEach(function (p) {
+    var v = p.b === null ? '?' : (p.b < 0 ? '(' + p.b + ')' : p.b);
+    txt += ' + ' + v + ' × ' + p.a;
+  });
+  el.textContent = txt;
+  el.className = 'eqn';
+}
+
+/* ── 머리의 학번·이름 칩 ── */
+function showMe() {
+  var el = document.getElementById('meChip');
+  if (!el) return;
+  if (!ME) { fill(el, [h('small', null, '둘러보는 중')]); return; }
+  fill(el, [h('small', null, ME.sid), document.createTextNode(' ' + ME.name)]);
+}
+
+/* ── 겹쳐 뜨는 창 ── */
+var veil = null;
+function closeVeil() {
+  if (veil) { veil.remove(); veil = null; }
+  document.onkeydown = keyNav;
+}
+function openSheet(title, bodyKids, footKids, opt) {
+  closeVeil();
+  opt = opt || {};
+  var body = h('div', { class: 'sheet-body' }, bodyKids);
+  var sheet = h('div', { class: 'sheet' + (opt.tall ? ' tall' : ''),
+    style: opt.maxWidth ? 'max-width:' + opt.maxWidth : null }, [
+    h('div', { class: 'sheet-head' }, [
+      h('h3', { text: title }),
+      h('div', { class: 'grow-sp' }),
+      h('button', { class: 'x-btn', type: 'button', 'aria-label': '닫기', onclick: closeVeil }, '✕')
+    ]),
+    body,
+    footKids ? h('div', { class: 'sheet-foot' }, footKids) : null
+  ]);
+  veil = h('div', { class: 'veil', onclick: function (e) { if (e.target === veil) closeVeil(); } }, sheet);
+  stage.appendChild(veil);
+  document.onkeydown = function (e) { if (e.key === 'Escape') { e.preventDefault(); closeVeil(); } };
+  return { sheet: sheet, body: body };
+}
+/** 알림 한 줄 (브라우저 alert 대신) */
+function say(title, text) {
+  openSheet(title, [h('p', { style: 'margin:0;font-size:17px', html: text })],
+    [h('button', { class: 'btn primary', type: 'button', onclick: closeVeil }, '알겠어요')],
+    { maxWidth: '620px' });
+}
+/** 묻기 (브라우저 confirm 대신) */
+function ask(title, text, okLabel, onOk) {
+  openSheet(title, [h('p', { style: 'margin:0;font-size:17px', html: text })], [
+    h('button', { class: 'btn primary', type: 'button', onclick: function () { closeVeil(); onOk(); } }, okLabel),
+    h('button', { class: 'btn', type: 'button', onclick: closeVeil }, '그만두기')
+  ], { maxWidth: '620px' });
+}
+
+/* ── 오렌지3 안내 슬라이드 ── */
+function openGuide(step) {
+  var steps = HOWTO[step] || [];
+  var i = 0;
+  /* tall: 안내 창은 높이를 꽉 채운다 — 그래야 그림이 들어갈 자리를 최대로 쓴다 */
+  var box = openSheet('오렌지3에서 이렇게 해 보세요 — ' + STEP_NAMES[step].split(' · ').pop(),
+    [], [], { tall: true });
+  function drawGuide() {
+    var s = steps[i];
+    fill(box.body, [
+      h('div', { class: 'guide-step' }, [
+        h('span', { class: 'guide-no', text: String(i + 1) }),
+        h('div', { html: s.html })
+      ]),
+      s.note ? h('p', { class: 'guide-note', html: s.note }) : null,
+      h('div', { class: 'guide-shots' }, (s.shots || []).map(function (sh) {
+        var g = SHOTS[sh.k];
+        var img = h('img', { src: g.src, alt: sh.cap, width: g.w, height: g.h });
+        /* box: [x, y, w, h] — 원본 그림 픽셀. %로 바꿔 얹으면 그림이 줄어도 따라 줄어든다 */
+        var wrap = sh.box
+          ? h('span', { class: 'shot-wrap' }, [img, h('span', {
+              class: 'shot-box',
+              style: 'left:' + (sh.box[0] / g.w * 100) + '%;top:' + (sh.box[1] / g.h * 100) +
+                '%;width:' + (sh.box[2] / g.w * 100) + '%;height:' + (sh.box[3] / g.h * 100) + '%'
+            })])
+          : img;
+        return h('figure', { class: 'guide-shot', style: 'max-width:' + Math.min(g.w, 1000) + 'px' }, [
+          wrap, h('figcaption', { text: sh.cap })
+        ]);
+      }))
+    ]);
+    fill(box.sheet.querySelector('.sheet-foot'), [
+      h('button', { class: 'btn', type: 'button', disabled: i === 0, onclick: function () { i--; drawGuide(); } }, '← 앞으로'),
+      h('div', { class: 'guide-dots' }, steps.map(function (_, k) {
+        return h('button', { class: k === i ? 'on' : '', type: 'button', onclick: function () { i = k; drawGuide(); } }, String(k + 1));
+      })),
+      i === steps.length - 1
+        ? h('button', { class: 'btn primary', type: 'button', onclick: closeVeil }, '다 봤어요')
+        : h('button', { class: 'btn primary', type: 'button', onclick: function () { i++; drawGuide(); } }, '다음 →')
+    ]);
+  }
+  drawGuide();
+}
+
+/* ── 오렌지3 캡처 붙여넣기 ──
+   클릭 → Ctrl+V, 또는 이미지 파일 끌어다 놓기. 큰 캡처는 줄여서 JPEG 로 담는다. */
+function pasteBox(key) {
+  var img = h('img', { class: 'paste-img', alt: '붙여 넣은 캡처', hidden: true });
+  var empty = h('div', { class: 'paste-empty' }, [
+    h('b', null, '여기를 클릭한 뒤 Ctrl+V'),
+    document.createTextNode('캡처하기: '),
+    h('kbd', null, 'Win'), document.createTextNode(' + '),
+    h('kbd', null, 'Shift'), document.createTextNode(' + '),
+    h('kbd', null, 'S'),
+    document.createTextNode(' → 영역을 끌어 고르기'),
+    h('br'), document.createTextNode('이미지 파일을 끌어다 놓아도 돼요.')
+  ]);
+  var box = h('div', {
+    class: 'paste', tabindex: '0', role: 'button',
+    'aria-label': key + ' 캡처 붙여넣기 칸', dataset: { img: key }
+  }, [empty, img]);
+  box.addEventListener('click', function () { box.focus(); });
+  box.addEventListener('paste', function (e) {
+    var items = (e.clipboardData || {}).items || [];
+    var item = Array.prototype.slice.call(items).find(function (it) {
+      return it.kind === 'file' && /^image\//.test(it.type);
+    });
+    e.preventDefault();
+    if (item) setShot(key, item.getAsFile());
+    else imgMsg(key, '클립보드에 이미지가 없어요. Win + Shift + S로 먼저 캡처하세요.', 'warn');
+  });
+  box.addEventListener('dragover', function (e) { e.preventDefault(); box.classList.add('drag'); });
+  box.addEventListener('dragleave', function () { box.classList.remove('drag'); });
+  box.addEventListener('drop', function (e) {
+    e.preventDefault(); box.classList.remove('drag');
+    setShot(key, (e.dataTransfer.files || [])[0]);
+  });
+  return box;
+}
+function pasteTools(key) {
+  var del = h('button', {
+    class: 'btn small danger', type: 'button', dataset: { imgdel: key }, hidden: true
+  }, '캡처 지우기');
+  var armed = null;
+  del.addEventListener('click', function () {
+    if (!armed) {
+      del.textContent = '정말 지울까요? 한 번 더 누르기';
+      del.classList.add('arm');
+      armed = setTimeout(function () {
+        armed = null; del.textContent = '캡처 지우기'; del.classList.remove('arm');
+      }, 3000);
+      return;
+    }
+    clearTimeout(armed); armed = null;
+    del.textContent = '캡처 지우기'; del.classList.remove('arm');
+    delete state[key]; save(); renderShots(); showSent(); imgMsg(key, '');
+  });
+  return h('div', { class: 'row', style: 'margin-top:7px;flex:none' }, [
+    del, h('span', { class: 's-msg', dataset: { imgmsg: key } })
+  ]);
+}
+function imgMsg(key, t, cls) {
+  var el = document.querySelector('[data-imgmsg="' + key + '"]');
+  if (el) { el.textContent = t || ''; el.className = 's-msg ' + (cls || ''); }
+}
+function renderShots() {
+  document.querySelectorAll('.paste').forEach(function (box) {
+    var k = box.dataset.img, v = state[k] || '', img = box.querySelector('.paste-img');
+    box.classList.toggle('has', !!v);
+    box.querySelector('.paste-empty').hidden = !!v;
+    img.hidden = !v;
+    if (v) img.src = v; else img.removeAttribute('src');
+    var del = document.querySelector('[data-imgdel="' + k + '"]');
+    if (del) del.hidden = !v;
+  });
+}
+/** 캡처를 줄여 JPEG data URL 로 (가로·세로 최대 1600px) */
+function shrink(file) {
+  return new Promise(function (resolve, reject) {
+    var url = URL.createObjectURL(file), im = new Image();
+    im.onload = function () {
+      URL.revokeObjectURL(url);
+      var max = 1600, q = 0.85, out = '';
+      for (var tries = 0; tries < 4; tries++) {
+        var r = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+        var c = document.createElement('canvas');
+        c.width = Math.round(im.naturalWidth * r);
+        c.height = Math.round(im.naturalHeight * r);
+        var g = c.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(im, 0, 0, c.width, c.height);
+        out = c.toDataURL('image/jpeg', q);
+        if (out.length < 1200000) break;
+        max = Math.round(max * 0.8); q = Math.max(0.6, q - 0.08);
+      }
+      resolve(out);
+    };
+    im.onerror = function () { URL.revokeObjectURL(url); reject(new Error('이미지를 읽지 못했어요')); };
+    im.src = url;
+  });
+}
+function setShot(key, file) {
+  if (!file || !/^image\//.test(file.type)) {
+    return imgMsg(key, '이미지가 아니에요. 화면을 캡처한 뒤 붙여 넣어 주세요.', 'warn');
+  }
+  imgMsg(key, '붙여 넣는 중…');
+  shrink(file).then(function (dataUrl) {
+    state[key] = dataUrl;
+    var ok = save();
+    renderShots(); showSent();
+    imgMsg(key, ok ? '✓ 캡처를 붙여 넣었어요.'
+      : '✓ 붙여 넣었어요. (저장 공간이 부족해 새로고침하면 사라질 수 있으니 바로 제출하세요)', ok ? 'ok' : 'warn');
+  }).catch(function () {
+    imgMsg(key, '이미지를 읽지 못했어요. 다시 캡처해 보세요.', 'warn');
+  });
+}
+
+/* ── 키보드로 넘기기 ──
+   입력 칸에 글을 쓰는 중에는 ← → 가 글자 사이를 움직이게 그냥 둔다. */
+function keyNav(e) {
+  var t = e.target, tag = t && t.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+  if (ONLINE && !ME) return;                    // 로그인 전에는 넘기지 않는다
+  if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); next(); }
+  else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+}
+</script>

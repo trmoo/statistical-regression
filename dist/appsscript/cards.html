@@ -1,0 +1,585 @@
+<!-- 학생 화면 카드 13장 — © 2026 티쳐무 · 모든 권리 보유
+     카드 하나 = 한 화면 = 1280×720. 스크롤이 없으므로 칸을 늘릴 때는 카드를 쪼갠다.
+     ⚠ 카드를 더하거나 문항을 늘릴 때는 data.html 의 FIELDS · Code.gs 의 fieldList_() 도 함께
+       고친다. 시험(test/wiring.test.mjs)이 「화면이 그리는 칸 = FIELDS」 를 대조한다.
+     ⚠ 넘치는지 눈으로 꼭 확인할 것 — npm run preview 로 열어 본다.
+
+     2026-10-25 사용자 지시로 고친 것
+       · 첫 화면(cover)이 **로그인 화면**이다. 그리는 일은 boot.html 의 renderGate( ) 가 한다.
+       · STEP 1 (3) 「그렇게 정한 이유」, STEP 2 (3) 「양·음의 뜻」을 뺐다.
+       · STEP 2 (2) 를 (1) 과 같은 화면으로 옮겼다 (카드 15 → 14장).
+       · STEP 1 에서도 advertising.csv 를 바로 내려받을 수 있다.
+
+     2026-10-26 사용자 지시
+       · STEP 1 의 좌우를 맞바꿨다 (왼쪽 준비 · 오른쪽 문제).
+       · **STEP 3 이 다중 선형 회귀 하나**가 되었다. 평가 지표에 회귀계수·절편 칸을 더했고,
+         옛 (2) 가장 좋은 모델 · (3) r과 R² 비교는 뺐다. 옛 (4) 캡처가 (2) 가 되었다.
+       · **STEP 5 를 없앴다** — STEP 3 과 겹쳐서다. STEP 4 도 같은 다중 회귀를 70/30 으로 평가한다.
+       · 그때 함께 빠졌던 **「광고비 제안」(adPlan)을 되살렸다** — 학습지의 마무리 물음이다.
+
+     2026-10-26 (두 번째 지시) — 차례를 원본 학습지에 가깝게 되돌렸다.
+       · **STEP 3 = 단순 선형 회귀 3종**(매체마다 하나) 평가 지표. 원본 학습지의 STEP 3 그대로.
+       · **STEP 4 = 다중 선형 회귀**(평가 지표 + 회귀계수 + 절편). 앞서 STEP 3 이던 것을 옮겼다.
+     2026-10-26 (네 번째 지시) — **STEP 5(기계학습 기반)는 다음 차시 앱**(regression-ml-pract)으로
+       옮겼다. 이 앱은 「통계적 회귀 분석」 한 차시(STEP 1~4) 분량이다.
+       대신 **STEP 3 끝(s3plan)과 STEP 4 끝(s4plan)에 「문제 상황에 대한 답」을 적는 카드**를 두었다 —
+       단순 회귀까지 보고 한 번, 다중까지 보고 다시 한 번. 두 답을 견주는 것이 이 차시의 마무리다.
+       · 캡처가 다시 세 장(STEP 3·4·5). 카드 13장 · 문항 55개. -->
+<script>
+/* ── 데이터 읽기 ── */
+var DF_HEAD = CSV.trim().split('\n')[0].split(',');
+var DF_ROWS = CSV.trim().split('\n').slice(1).map(function (l) { return l.split(','); });
+
+function csvDownload() {
+  var text = CSV.trim().replace(/\n/g, '\r\n') + '\r\n';
+  var blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'advertising.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+}
+/** 어느 화면에서든 쓸 수 있는 내려받기 단추 */
+function csvButton(cls) {
+  return h('button', { class: 'btn green ' + (cls || ''), type: 'button', onclick: csvDownload },
+    '⤓ advertising.csv 내려받기');
+}
+/** 속성의 뜻 표 */
+function attrTable() {
+  return tbl('', [h('tr', null, [
+    h('th', { class: 'l' }, '속성'), h('th', { class: 'l' }, '설명'), h('th', null, '단위')
+  ])].concat(ATTR_DESC.map(function (d) {
+    return h('tr', null, [
+      h('td', { class: 'l' }, attr(d[0])),
+      h('td', { class: 'l', text: d[1] }),
+      h('td', { text: d[2] })
+    ]);
+  })));
+}
+
+/* ── 캡처 카드 만들기 — STEP 마다 마지막 화면이다 ──
+   ⚠ 등록 차례가 곧 학생이 넘기는 차례다. 각 STEP 카드 바로 뒤에서 부를 것. */
+function shotCard(id, ch, step, no) {
+  var key = 'img' + step;
+  return REG({
+    id: id, ch: ch, step: step, tag: '<small>STEP</small>' + step,
+    title: 'STEP ' + step + ' 작업 화면 캡처',
+    render: function (body) {
+      body.appendChild(h('div', { style: 'height:100%;display:flex;flex-direction:column' }, [
+        subT(no, '오렌지3 작업 화면을 캡처해 붙여 넣으세요.', '위젯 연결과 결과 창이 함께 보이게'),
+        pasteBox(key),
+        pasteTools(key)
+      ]));
+    }
+  });
+}
+
+/* ── 0. 표지 겸 로그인 ──
+   그리는 일은 boot.html 의 renderGate( ) 가 한다 (서버를 불러야 하므로). */
+var COVER_ART = '<svg class="chart-art" viewBox="0 0 300 200" aria-hidden="true">' +
+  '<line x1="110" y1="44" x2="84" y2="10" class="tv-ant"/><line x1="110" y1="44" x2="138" y2="8" class="tv-ant"/>' +
+  '<circle cx="84" cy="10" r="4" fill="#ffb37a"/><circle cx="138" cy="8" r="4" fill="#ffb37a"/>' +
+  '<rect x="22" y="44" width="180" height="124" rx="18" fill="#ff8a3d"/>' +
+  '<rect x="22" y="44" width="180" height="124" rx="18" fill="none" stroke="#1c2333" stroke-opacity=".25" stroke-width="2"/>' +
+  '<rect x="36" y="58" width="124" height="96" rx="12" fill="#13283a"/>' +
+  '<rect x="36" y="58" width="124" height="96" rx="12" fill="url(#tvGlow)"/>' +
+  '<path d="M46 70 q8 -6 20 -4" stroke="#ffffff" stroke-opacity=".35" stroke-width="3" fill="none" stroke-linecap="round"/>' +
+  '<text x="98" y="118" text-anchor="middle" class="tv-ad">AD</text>' +
+  '<circle cx="181" cy="80" r="9" fill="#1c2333" fill-opacity=".85"/><circle cx="181" cy="106" r="9" fill="#1c2333" fill-opacity=".85"/>' +
+  '<rect x="172" y="126" width="18" height="4" rx="2" fill="#1c2333" fill-opacity=".6"/>' +
+  '<rect x="172" y="134" width="18" height="4" rx="2" fill="#1c2333" fill-opacity=".6"/>' +
+  '<rect x="46" y="168" width="14" height="14" rx="3" fill="#c96424"/><rect x="164" y="168" width="14" height="14" rx="3" fill="#c96424"/>' +
+  '<g transform="rotate(-14 246 70)">' +
+  '<rect x="206" y="50" width="80" height="42" rx="6" fill="#3fc485"/>' +
+  '<rect x="212" y="56" width="68" height="30" rx="4" fill="none" stroke="#e9fff3" stroke-opacity=".7" stroke-width="1.5"/>' +
+  '<circle cx="246" cy="71" r="11" fill="#e9fff3" fill-opacity=".9"/>' +
+  '<text x="246" y="76" text-anchor="middle" class="money-sign" fill="#1f9d63">$</text></g>' +
+  '<g>' +
+  '<ellipse cx="250" cy="178" rx="30" ry="9" fill="#c98a12"/><rect x="220" y="168" width="60" height="10" fill="#c98a12"/>' +
+  '<ellipse cx="250" cy="168" rx="30" ry="9" fill="#f5c04a"/>' +
+  '<rect x="220" y="156" width="60" height="12" fill="#c98a12"/><ellipse cx="250" cy="156" rx="30" ry="9" fill="#f5c04a"/>' +
+  '<rect x="220" y="144" width="60" height="12" fill="#c98a12"/><ellipse cx="250" cy="144" rx="30" ry="9" fill="#ffd772"/>' +
+  '<text x="250" y="149" text-anchor="middle" class="money-sign" fill="#9a6400" font-size="13">$</text></g>' +
+  '<circle cx="214" cy="120" r="13" fill="#f5c04a" stroke="#c98a12" stroke-width="3"/>' +
+  '<text x="214" y="125" text-anchor="middle" class="money-sign" fill="#9a6400" font-size="14">$</text>' +
+  '<defs><radialGradient id="tvGlow" cx="35%" cy="30%" r="80%">' +
+  '<stop offset="0" stop-color="#4fe0a0" stop-opacity=".45"/><stop offset="1" stop-color="#4fe0a0" stop-opacity="0"/>' +
+  '</radialGradient></defs></svg>';
+
+/* 표지 맨 위에 **이 차시가 무엇인지**를 한 줄로 밝힌다 (2026-10-26 사용자 지시).
+   ⚠ 로그인 화면(renderGate)이 아니라 **카드 쪽**에 둔다 — 로그인 전·후·오프라인
+     어느 상태에서도 늘 보여야 하기 때문이다. 2차시 앱은 같은 자리에 「기계학습 기반」이 들어간다. */
+REG({
+  id: 'cover', ch: 0, tag: '<small>START</small>표지', title: '광고비와 매출 사이의 관계 알아보기',
+  render: function (body) {
+    body.appendChild(h('div', { class: 'cover' }, [
+      /* ⚠ 제목 줄을 gateCol **안에** 두면 안 된다 — renderGate( ) 가 fill( ) 로 그 칸을
+         통째로 비우므로 함께 지워진다. 바깥에 형제로 두고 둘을 한 칸에 묶는다. */
+      h('div', { class: 'cover-left' }, [
+        h('p', { class: 'cover-kicker' }, [
+          h('span', { class: 'ck-no' }, '1차시'),
+          h('span', { class: 'ck-t' }, '통계적 회귀 분석'),
+          h('span', { class: 'ck-s' }, '「데이터 과학」 회귀 분석 모델')
+        ]),
+        h('div', { class: 'gate-col', id: 'gateCol' })
+      ]),
+      h('div', { class: 'cover-art', html: COVER_ART })
+    ]));
+    renderGate(document.getElementById('gateCol'));
+  }
+});
+
+/* ── 1. 데이터셋 ── */
+var dfPage = 0;
+var DF_PER = 11;
+REG({
+  id: 'data', ch: 0, tag: '<small>DATA</small>CSV', title: '데이터셋 내려받기 · 살펴보기',
+  render: function (body) {
+    var tbody = h('tbody');
+    var shape = h('span', { class: 'df-shape' });
+    var pageTxt = h('span', { class: 'small muted' });
+    function drawPage() {
+      var total = Math.ceil(DF_ROWS.length / DF_PER);
+      dfPage = Math.max(0, Math.min(total - 1, dfPage));
+      var from = dfPage * DF_PER;
+      fill(tbody, DF_ROWS.slice(from, from + DF_PER).map(function (r, i) {
+        return h('tr', null, [h('th', { text: String(from + i) })]
+          .concat(r.map(function (v) { return h('td', { text: v }); })));
+      }));
+      pageTxt.textContent = (dfPage + 1) + ' / ' + total + ' 쪽';
+    }
+    shape.textContent = DF_ROWS.length + ' rows × ' + DF_HEAD.length + ' columns';
+
+    body.appendChild(h('div', { class: 'cols wide-r' }, [
+      h('div', { class: 'col' }, [
+        h('p', { class: 'lead', html: '아래 단추로 <b>advertising.csv</b> 를 내려받아 오렌지3의 ' +
+          '<span class="w">File</span> 위젯에서 열어 보세요.' }),
+        subT(null, '각 속성의 뜻', '한 행 = 한 시장에서의 광고비와 판매량'),
+        attrTable(),
+        h('p', { class: 'small muted', style: 'margin:8px 0 12px' },
+          '예) 첫 번째 행 TV = 230.1 → TV 광고비 약 23만 100달러, Sales = 22.1 → 약 2만 2,100개 판매'),
+        h('div', { class: 'row' }, [csvButton('big')])
+      ]),
+      h('div', { class: 'col' }, [
+        h('div', { class: 'df-head' }, [h('b', { class: 'small' }, '데이터 미리보기'), shape]),
+        tbl('df', [h('thead', null, [h('tr', null, [h('th', { style: 'width:46px' })]
+          .concat(DF_HEAD.map(function (x) { return h('th', { class: 'c-' + x, text: x }); })))]), tbody]),
+        h('div', { class: 'row', style: 'margin-top:8px' }, [
+          h('button', { class: 'btn small', type: 'button', onclick: function () { dfPage--; drawPage(); } }, '◀ 앞쪽'),
+          pageTxt,
+          h('button', { class: 'btn small', type: 'button', onclick: function () { dfPage++; drawPage(); } }, '뒤쪽 ▶'),
+          h('button', { class: 'btn small', type: 'button', onclick: function () { dfPage = 0; drawPage(); } }, '처음으로')
+        ])
+      ])
+    ]));
+    drawPage();
+  }
+});
+
+/* ── 2. STEP 1 ──
+   왼쪽이 준비(파일 받기·속성 뜻), 오른쪽이 풀 문제 — 읽고 나서 답하는 차례대로 놓았다
+   (2026-10-26 사용자 지시로 좌우를 맞바꿨다). 문제 쪽이 넓어야 하므로 wide-r 이다. */
+REG({
+  id: 's1', ch: 1, step: 1, tag: '<small>STEP</small>1', title: '데이터 준비 및 특성 파악하기',
+  render: function (body) {
+    body.appendChild(h('div', { class: 'cols wide-r' }, [
+      h('div', { class: 'col' }, [
+        subT(null, '먼저 데이터를 받으세요', 'advertising.csv'),
+        h('div', { class: 'row', style: 'margin-bottom:12px' }, [csvButton('big')]),
+        h('p', { class: 'small muted', style: 'margin:0 0 10px' },
+          '받은 파일을 오렌지3의 File 위젯에서 엽니다. 위젯 위쪽에 데이터 개수(instances)와 ' +
+          '속성 개수(features)가 나옵니다.'),
+        subT(null, '각 속성의 뜻'),
+        attrTable()
+        /* 「Role 을 target 으로」 안내는 2026-10-26 사용자 지시로 뺐다 —
+           오렌지3 안내(HOWTO[1] 마지막 장)에 같은 말이 있다. */
+      ]),
+      h('div', { class: 'col' }, [
+        /* 먼저 「무엇을 풀려고 하는가」를 주고, 그다음에 독립·종속 변수를 묻는다
+           (2026-10-26 사용자 지시). 이 상자를 (2) 앞에서 치우지 말 것.
+           ⚠ 「무엇이 원인이고 무엇이 결과인지」라는 말을 다시 넣지 말 것 (2026-10-26 사용자 지시).
+             관측 자료라 회귀로는 인과를 가릴 수 없는데, 독립 변수를 원인이라 부르면
+             「광고비가 매출의 원인임을 이 데이터가 보여 준다」는 오개념이 생긴다. */
+        h('p', { class: 'problem' }, [
+          h('span', { class: 'problem-t' }, '문제 상황'),
+          h('span', { html: '어느 회사가 <b>TV · 라디오 · 신문</b> 세 가지 매체에 광고비를 쓰고 있습니다. ' +
+            '광고비를 더 쓰면 <b>매출이 오를까요?</b> 오른다면 <b>어느 매체</b>에 쓰는 것이 가장 효과가 클까요?' })
+        ]),
+        h('div', { class: 'blk' }, [
+          subT(1, '데이터의 기본 정보'),
+          tbl('', [
+            h('tr', null, [h('th', null, '데이터 개수 (행)'), h('th', null, '속성 개수 (열)')]),
+            h('tr', null, [h('td', null, numIn('rows', '개')), h('td', null, numIn('cols', '개'))])
+          ])
+        ]),
+        h('div', { class: 'blk' }, [
+          subT(2, '각 속성은 독립 변수일까요, 종속 변수일까요?'),
+          tbl('', [h('tr', null, [h('th', { class: 'l' }, '속성'), h('th', null, '변수의 종류')])]
+            .concat(ATTRS.map(function (a) {
+              return h('tr', null, [
+                h('td', { class: 'l' }, attr(a)),
+                h('td', null, pickIn('role_' + a, [['독립', '독립 변수'], ['종속', '종속 변수']]))
+              ]);
+            }))),
+          checkBox('roleCheck')
+        ])
+      ])
+    ]));
+  }
+});
+
+/* ── 3. STEP 2 — (1) 과 (2) 를 한 화면에서 ── */
+REG({
+  id: 's2', ch: 2, step: 2, tag: '<small>STEP</small>2', title: '상관관계 확인하기',
+  render: function (body) {
+    body.appendChild(h('div', null, [
+      h('p', { class: 'lead', html: '광고비와 매출액 사이에 상관관계가 있는지 알아보고, ' +
+        '각 독립 변수와 종속 변수(<span class="attr a-Sales">Sales</span>)의 상관계수를 적어 보세요.' }),
+      subT(1, '속성별 상관계수와 상관관계의 방향 · 정도'),
+      h('p', { class: 'corr-guide' }, [
+        h('span', { html: '상관관계의 정도는 상관계수의 절댓값 <b>|r|</b>로 판단해요.' }),
+        h('span', { class: 'lv' }, [h('i', { class: 's3' }), document.createTextNode('강함 0.7 ≤ |r|')]),
+        h('span', { class: 'lv' }, [h('i', { class: 's2' }), document.createTextNode('보통 0.3 ≤ |r| < 0.7')]),
+        h('span', { class: 'lv' }, [h('i', { class: 's1' }), document.createTextNode('약함 |r| < 0.3')])
+      ]),
+      tbl('', [h('tr', null, [
+        h('th', { class: 'l' }, '독립 변수 ↔ Sales'), h('th', null, '상관계수 r'),
+        h('th', null, '방향'), h('th', null, '정도')
+      ])].concat(XS.map(function (a) {
+        return h('tr', null, [
+          h('td', { class: 'l' }, [attr(a), document.createTextNode(' ↔ '), attr('Sales')]),
+          h('td', null, numIn('r_' + a, 'r', { min: -1, max: 1 })),
+          h('td', null, pickIn('sign_' + a, [['양', '양(+)'], ['음', '음(−)']], 'sign')),
+          h('td', null, pickIn('str_' + a, [['강함', '강함'], ['보통', '보통'], ['약함', '약함']], 'str'))
+        ]);
+      }))),
+      checkBox('corrCheck'),
+
+      h('div', { class: 'cols', style: 'height:auto;margin-top:12px' }, [
+        h('div', { class: 'col' }, [
+          subT(2, 'Sales와 가장 높은 상관관계를 가지는 독립 변수는 무엇인가요?'),
+          tbl('', [
+            h('tr', null, [h('th', null, '독립 변수'), h('th', null, '상관계수')]),
+            h('tr', null, [
+              h('td', null, selectIn('bestVar', XS)),
+              h('td', null, numIn('bestR', 'r', { min: -1, max: 1 }))
+            ])
+          ]),
+          checkBox('bestCheck')
+        ]),
+        h('div', { class: 'col' }, [
+          h('p', { class: 'tip', style: 'margin-top:26px', html: '위 표에 적은 세 값 가운데 ' +
+            '<b>절댓값이 가장 큰</b> 것을 고르면 돼요. 산점도에서 <b>회귀선 표시</b>에 체크하면 ' +
+            '선 옆에 작은 글씨로 r 값이 나옵니다. r 앞에 <b>−</b>가 붙어 있는지 꼭 확인하세요.' })
+        ])
+      ])
+    ]));
+  }
+});
+
+/* ── 4. STEP 3 (1) — 상관계수와 결정 계수를 이어 주기 ──
+   지표를 구하기 **전에** STEP 2 의 r 을 제곱해 두면, 다음 화면에서 적는 R² 와 맞아떨어진다.
+   「단순 회귀에서는 R² = r²」를 학생이 스스로 발견하게 하려는 것이다 (2026-10-26 사용자 지시).
+   ⚠ 이 카드를 (2) 뒤로 옮기지 말 것 — 먼저 짐작하고 나중에 확인해야 발견이 된다. */
+REG({
+  id: 's3link', ch: 3, step: 3, tag: '<small>STEP</small>3', title: '상관계수와 결정 계수는 어떤 사이일까',
+  render: function (body) {
+    var show = function (k) {
+      var v = state[k];
+      return v === undefined || v === '' ? '–' : String(v);
+    };
+    body.appendChild(h('div', null, [
+      h('p', { class: 'lead', html: 'STEP 2에서 구한 <b>상관계수 r</b>와, 이제 구할 <b>결정 계수 R²</b>는 ' +
+        '서로 아무 사이도 아닐까요? <b>r을 제곱한 값</b>을 먼저 보아 두고, 다음 화면에서 나올 R²와 맞춰 봅시다.' }),
+      subT(null, 'STEP 2의 상관계수를 제곱하면', '적은 값으로 앱이 셈해 보여 줍니다'),
+      tbl('mt', [
+        h('thead', null, [h('tr', null, [
+          h('th', { class: 'l' }, '독립 변수 → Sales'),
+          h('th', null, [document.createTextNode('상관계수 r'), h('small', null, 'STEP 2에 적은 값')]),
+          h('th', null, [document.createTextNode('r × r'), h('small', null, '= r²')])
+        ])]),
+        h('tbody', null, XS.map(function (a) {
+          return h('tr', null, [
+            h('td', { class: 'l' }, [attr(a), document.createTextNode(' → '), attr('Sales')]),
+            h('td', { class: 'ro', text: show('r_' + a) }),
+            /* 앱이 셈해 채운다 — core.html 의 checkAll( ) 이 data-rsq 를 찾아 넣는다 */
+            h('td', { class: 'ro eqv', dataset: { rsq: a }, text: '–' })
+          ]);
+        }))
+      ]),
+      h('p', { class: 'tbl-note' }, 'STEP 2에 적은 r이 비어 있으면 돌아가 먼저 적어 주세요.'),
+      checkBox('rsqCheck'),
+      h('p', { class: 'tip', html: '<b>R²(결정 계수)</b>는 「이 모델이 매출의 변화를 몇 %나 설명하는가」예요. ' +
+        '독립 변수가 <b>하나뿐인 단순 회귀</b>에서는 <b>R² = r²</b> 가 됩니다 — 다음 화면에서 직접 확인해 보세요.' }),
+      h('p', { class: 'tip', html: '다만 독립 변수가 여러 개인 <b>다중 회귀</b>(STEP 4)에서는 ' +
+        '상관계수 하나로 R²를 만들 수 없어요. 그때는 이 관계가 성립하지 않습니다.' })
+    ]));
+  }
+});
+
+/* ── 5. STEP 3 (2) — 단순 선형 회귀 3종 ──
+   독립 변수를 하나만 쓰는 모델을 매체마다 만들어 평가 지표를 적는다 (원본 학습지의 STEP 3). */
+function metricHead(firstLabel) {
+  return h('thead', null, [h('tr', null, [h('th', { class: 'l' }, firstLabel)]
+    .concat(METRICS.map(function (m) {
+      return h('th', null, [document.createTextNode(m[1]), h('small', { text: m[2] })]);
+    })))]);
+}
+/** 세 매체를 모두 쓴다는 이름표 */
+function allAttrs() {
+  return [attr('TV'), document.createTextNode(' '), attr('Radio'), document.createTextNode(' '),
+    attr('Newspaper'), document.createTextNode(' → '), attr('Sales')];
+}
+REG({
+  id: 's3simple', ch: 3, step: 3, tag: '<small>STEP</small>3', title: '[통계적 회귀 분석] 단순 선형 회귀',
+  render: function (body) {
+    body.appendChild(h('div', null, [
+      h('p', { class: 'lead', html: '독립 변수를 <b>하나만</b> 쓰는 단순 선형 회귀 모델을 TV, Radio, Newspaper로 ' +
+        '각각 만들고, 전체 데이터로 평가한 결과를 비교해 보세요.' }),
+      subT(1, '독립 변수별 단순 선형 회귀 모델의 평가 지표'),
+      tbl('mt', [metricHead('모델 (독립 변수 → Sales)'),
+        h('tbody', null, XS.map(function (a) {
+          return h('tr', null, [h('td', { class: 'l' }, [attr(a), document.createTextNode(' → '), attr('Sales')])]
+            .concat(METRICS.map(function (m) {
+              return h('td', null, numIn('sl_' + a + '_' + m[0], m[1], { label: a + ' 모델 ' + m[1] }));
+            })));
+        }))]),
+      checkBox('slCheck'),
+      h('p', { class: 'tip', html: 'MSE, RMSE, MAE, MAPE는 <b>작을수록</b>, R²는 <b>1에 가까울수록</b> 좋은 모델입니다. ' +
+        'RMSE는 MSE에 제곱근을 씌운 값이므로 두 값을 비교해 잘 옮겨 적었는지 확인해 보세요.' }),
+      /* MAPE 는 처음 보는 학생이 많아 여기서 한 번 풀어 준다 (2026-10-26 사용자 지시) */
+      h('p', { class: 'tip', html: '<b>MAPE</b>(평균절대백분율오차)는 오차가 실제값의 <b>몇 %</b>인지를 ' +
+        '평균 낸 값이에요. MAPE가 <b>0.15</b>(=15%)라면 예측이 실제 판매량에서 평균 <b>15%쯤 빗나간다</b>는 뜻입니다. ' +
+        'MAPE는 <b>%</b>라서 단위가 다른 자료끼리도 견줄 수 있어요. ' +
+        '<small class="muted">(오렌지3 판에 따라 0.15로 보이기도, 15로 보이기도 합니다 — 보이는 대로 적으면 돼요.)</small>' })
+    ]));
+  }
+});
+
+/* ── 6. STEP 3 (3) [심화] 회귀계수와 절편 ──
+   평가 지표만으로는 「얼마나 잘 맞나」까지만 알 수 있다. 회귀식을 꺼내 보면
+   「광고비 1,000달러가 매출을 얼마나 움직이나」가 숫자로 나온다. 2026-10-26 사용자 지시로 더했다. */
+REG({
+  id: 's3coef', ch: 3, step: 3, tag: '<small>STEP</small>3', title: '[심화] 단순 회귀의 회귀식 꺼내 보기',
+  render: function (body) {
+    body.appendChild(h('div', null, [
+      h('p', { class: 'lead' }, [
+        h('span', { class: 'adv' }, '심화'),
+        h('span', { html: '선형회귀에 <span class="w">Data Table</span> 을 <b>회귀 계수(Coefficients)</b> 로 이으면 ' +
+          '모델이 세운 <b>회귀식</b>이 나옵니다. 세 모델의 <b>절편</b>과 <b>회귀계수</b>를 적어 보세요.' })
+      ]),
+      subT(2, '모델별 회귀계수와 절편', '여유가 있으면 해 보세요 — 안 해도 됩니다'),
+      tbl('mt', [
+        h('thead', null, [h('tr', null, [
+          h('th', { class: 'l' }, '모델 (독립 변수 → Sales)'),
+          h('th', null, [document.createTextNode('절편'), h('small', null, 'intercept')]),
+          h('th', null, [document.createTextNode('회귀계수'), h('small', null, '그 매체의 기울기')])
+        ])]),
+        h('tbody', null, XS.map(function (a) {
+          return h('tr', null, [
+            h('td', { class: 'l' }, [attr(a), document.createTextNode(' → '), attr('Sales')]),
+            h('td', null, numIn('sb0_' + a, '절편', { label: a + ' 모델 절편' })),
+            h('td', null, numIn('sb_' + a, a, { label: a + ' 모델 회귀계수' }))
+          ]);
+        }))
+      ]),
+      checkBox('sbCheck'),
+      /* 적는 대로 회귀식 세 줄이 조립된다 — checkAll( ) 이 채운다 */
+      h('div', { class: 'eqn-list', id: 'eqn3' }),
+      h('p', { class: 'tip', html: '회귀계수는 <b>그 매체에 광고비를 1,000달러 더 썼을 때 매출(천 개)이 얼마나 늘어나는가</b>를 ' +
+        '뜻해요. 세 값을 견주어 보면 어느 매체가 매출을 가장 많이 움직이는지 보입니다.' })
+    ]));
+  }
+});
+
+/* ── 7-2. STEP 3 (3) — 여기까지의 답을 한 번 적고 넘어간다 ──
+   단순 회귀만 본 시점의 **1차 답**이다. STEP 4 에서 같은 물음을 다시 던져
+   「다중까지 보고 나니 생각이 바뀌었나」를 견주게 한다 (2026-10-26 사용자 지시). */
+REG({
+  id: 's3plan', ch: 3, step: 3, tag: '<small>STEP</small>3', title: '여기까지의 답 — 어느 매체에 쓸까',
+  render: function (body) {
+    var show = function (k) {
+      var v = state[k];
+      return v === undefined || v === '' ? '–' : String(v);
+    };
+    body.appendChild(h('div', { class: 'cols' }, [
+      h('div', { class: 'col' }, [
+        subT(null, '내가 적은 값 되짚어 보기', 'STEP 2 · STEP 3'),
+        tbl('mt', [
+          h('thead', null, [h('tr', null, [
+            h('th', { class: 'l' }, '매체'),
+            h('th', null, [document.createTextNode('상관계수 r'), h('small', null, 'STEP 2')]),
+            h('th', null, [document.createTextNode('R²'), h('small', null, 'STEP 3')])
+          ])]),
+          h('tbody', null, XS.map(function (a) {
+            return h('tr', null, [
+              h('td', { class: 'l' }, attr(a)),
+              h('td', { class: 'ro', text: show('r_' + a) }),
+              h('td', { class: 'ro', text: show('sl_' + a + '_r2') })
+            ]);
+          }))
+        ]),
+        h('p', { class: 'tip', html: '여기까지는 <b>매체를 하나씩만</b> 본 결과예요. ' +
+          '다음 STEP에서 셋을 <b>한꺼번에</b> 넣어 보면 답이 그대로일까요?' })
+      ]),
+      h('div', { class: 'col grow' }, [
+        subT(3, '매출을 늘리려면 광고비를 어느 매체에 쓰는 것이 좋을지 근거를 들어 제안해 보세요.'),
+        areaIn('adPlan1', '예: ○○의 R²가 가장 크므로 …')
+      ])
+    ]));
+  }
+});
+
+/* ── 8. STEP 4 (1) 다중 선형 회귀의 평가 지표 ──
+   STEP 3 과 같은 틀이다 — (1) 지표 · (2) 심화 회귀식 · (3) 캡처.
+   회색 줄에 STEP 3 에 적은 단순 회귀 값이 저절로 옮겨 와, 다중이 더 나은지 바로 견줄 수 있다. */
+REG({
+  id: 's4multi', ch: 4, step: 4, tag: '<small>STEP</small>4', title: '[통계적 회귀 분석] 다중 선형 회귀',
+  render: function (body) {
+    body.appendChild(h('div', null, [
+      h('p', { class: 'lead', html: '이번에는 TV, Radio, Newspaper를 <b>모두</b> 독립 변수로 쓰는 다중 선형 회귀 ' +
+        '모델을 만들고, STEP 3처럼 전체 데이터로 평가해 보세요. 여러 개를 함께 쓰면 더 잘 예측할까요?' }),
+
+      subT(1, '다중 선형 회귀 모델의 평가 지표', 'STEP 3에 적은 값과 견주어 보세요'),
+      tbl('mt', [metricHead('모델 (독립 변수 → Sales)'), h('tbody', null,
+        XS.map(function (a) {
+          return h('tr', { class: 'ref' }, [h('td', { class: 'l' }, [
+            document.createTextNode('STEP 3 · 단순 '), attr(a)
+          ])].concat(METRICS.map(function (m) {
+            return h('td', { class: 'ro', dataset: { ref: 'sl_' + a + '_' + m[0] }, text: '–' });
+          })));
+        }).concat([
+          h('tr', null, [h('td', { class: 'l' }, [h('b', null, 'STEP 4 · 다중')])]
+            .concat(METRICS.map(function (m) {
+              return h('td', null, numIn('mr_' + m[0], m[1], { label: '다중 회귀 모델 ' + m[1] }));
+            })))
+        ]))]),
+      h('p', { class: 'tbl-note' }, '회색 줄은 STEP 3에 적은 값이 자동으로 나타나요.'),
+      checkBox('mrCheck'),
+      h('p', { class: 'tip', html: '독립 변수를 하나 더 쓰면 R²는 <b>거의 언제나</b> 조금이라도 올라갑니다. ' +
+        '그러니 「올랐다」보다 <b>얼마나</b> 올랐는지를 보세요.' })
+    ]));
+  }
+});
+
+/* ── 9. STEP 4 (2) [심화] 회귀계수와 절편 ── */
+REG({
+  id: 's4coef', ch: 4, step: 4, tag: '<small>STEP</small>4', title: '[심화] 다중 회귀의 회귀식 꺼내 보기',
+  render: function (body) {
+    body.appendChild(h('div', null, [
+      h('p', { class: 'lead' }, [
+        h('span', { class: 'adv' }, '심화'),
+        h('span', { html: 'STEP 3 심화와 같은 방법입니다. <span class="w">Data Table</span> 을 ' +
+          '<b>회귀 계수(Coefficients)</b> 로 이으면, 이번에는 <b>intercept 한 줄과 매체 세 줄</b>이 함께 나옵니다.' })
+      ]),
+      subT(2, '회귀계수와 절편', '여유가 있으면 해 보세요 — 안 해도 됩니다'),
+      tbl('mt', [
+        h('thead', null, [h('tr', null, [
+          h('th', null, [document.createTextNode('절편'), h('small', null, 'intercept')])
+        ].concat(XS.map(function (a) {
+          return h('th', null, [document.createTextNode(a + ' 회귀계수'), h('small', null, '기울기')]);
+        })))]),
+        h('tbody', null, [h('tr', null, [h('td', null, numIn('b0', '절편', { label: '절편' }))]
+          .concat(XS.map(function (a) {
+            return h('td', null, numIn('b_' + a, a, { label: a + ' 회귀계수' }));
+          })))])
+      ]),
+      /* 적는 대로 회귀식이 조립되어 보인다 — checkAll( ) 이 채운다 */
+      h('p', { class: 'eqn', id: 'eqn' }),
+      h('p', { class: 'tip', html: 'STEP 3 심화에 적은 값과 견주어 보세요. ' +
+        '같은 매체인데 <b>혼자 쓸 때와 함께 쓸 때 회귀계수가 달라집니다</b> — 다른 매체가 설명하던 몫이 갈라지기 때문이에요.' })
+    ]));
+  }
+});
+
+/* ── 10. STEP 4 (3) — 이 차시의 최종 답 ──
+   왼쪽에 STEP 3 에서 적은 1차 답과 두 가지 기준(상관계수·회귀계수)을 나란히 보여 주어,
+   **생각이 바뀌었는지**를 학생이 스스로 견주게 한다. */
+REG({
+  id: 's4plan', ch: 4, step: 4, tag: '<small>STEP</small>4', title: '마지막 답 — 생각이 바뀌었나',
+  render: function (body) {
+    var show = function (k) {
+      var v = state[k];
+      return v === undefined || v === '' ? '–' : String(v);
+    };
+    body.appendChild(h('div', { class: 'cols' }, [
+      h('div', { class: 'col' }, [
+        subT(null, '두 기준을 나란히', '상관계수는 STEP 2 · 회귀계수는 STEP 4'),
+        tbl('mt', [
+          h('thead', null, [h('tr', null, [
+            h('th', { class: 'l' }, '매체'),
+            h('th', null, [document.createTextNode('상관계수 r'), h('small', null, '함께 움직이는 정도')]),
+            h('th', null, [document.createTextNode('회귀계수'), h('small', null, '1,000달러당 매출')])
+          ])]),
+          h('tbody', null, XS.map(function (a) {
+            return h('tr', null, [
+              h('td', { class: 'l' }, attr(a)),
+              h('td', { class: 'ro', text: show('r_' + a) }),
+              h('td', { class: 'ro', text: show('b_' + a) })
+            ]);
+          }))
+        ]),
+        h('p', { class: 'tbl-note' }, '회귀계수 칸이 비어 있으면 (2) 심화를 해 보면 채워져요.'),
+        h('div', { class: 'blk', style: 'margin-top:10px' }, [
+          subT(null, 'STEP 3에서 적은 나의 1차 답'),
+          h('p', { class: 'quote', id: 'plan1' })
+        ])
+      ]),
+      h('div', { class: 'col grow' }, [
+        subT(3, '다중 회귀까지 보고 나서, 매출을 늘리려면 어느 매체에 쓰는 것이 좋을지 다시 제안해 보세요.'),
+        h('div', { class: 'row', style: 'margin-bottom:8px' }, [
+          h('span', { class: 'small muted' }, '1차 답과 견주면'),
+          pickIn('planChanged', [['그대로', '그대로예요'], ['바뀌었다', '바뀌었어요']])
+        ]),
+        areaIn('adPlan', '예: 상관계수로는 TV가 가장 컸지만, 회귀계수로 보면 …')
+      ])
+    ]));
+  }
+});
+
+/* ── 11. STEP 4 캡처 ── */
+shotCard('s4shot', 4, 4, 4);
+
+/* ── 12. 제출 ──
+   학번·이름은 로그인으로 이미 정해졌으므로 여기서 다시 적지 않는다. */
+REG({
+  id: 'submit', ch: 5, tag: '<small>LAST</small>제출', title: '선생님께 제출하기',
+  render: function (body) {
+    var filled = function (f) { return String(state[f[0]] || '').trim() !== ''; };
+    var cards = [1, 2, 3, 4].map(function (st) {
+      var all = FIELDS.filter(function (f) { return f[2] === st; });
+      var need = all.filter(function (f) { return !f[4]; });      // 꼭 해야 하는 칸
+      var adv = all.filter(function (f) { return f[4]; });        // [심화] — 안 해도 된다
+      var done = need.filter(filled).length;
+      var advDone = adv.filter(filled).length;
+      var shot = IMG_KEYS.filter(function (p) { return p[2] === st; })[0];
+      var hasShot = shot ? !!state[shot[0]] : null;
+      var full = done === need.length && (hasShot === null || hasShot);
+      return h('div', { class: 'done-card' + (full ? ' full' : '') }, [
+        h('h4', { text: 'STEP ' + st }),
+        h('p', null, [
+          document.createTextNode('칸 '), h('b', { text: done + '/' + need.length }),
+          hasShot === null ? null : document.createTextNode(' · 캡처 ' + (hasShot ? '✓' : '없음'))
+        ]),
+        adv.length ? h('p', { class: 'small muted', style: 'margin-top:2px' },
+          '심화 ' + advDone + '/' + adv.length + (advDone ? '' : ' (안 해도 돼요)')) : null
+      ]);
+    });
+    body.appendChild(h('div', { style: 'height:100%;display:flex;flex-direction:column' }, [
+      h('p', { class: 'lead', html: '아래 단추를 누르면 <b>' + esc(ME ? ME.sid + ' ' + ME.name : '') +
+        '</b> 이름으로 제출됩니다. 고친 뒤 다시 누르면 <b>가장 최근 답</b>으로 바뀌어 저장됩니다. ' +
+        '(새 줄이 생기지 않아요)' }),
+      h('div', { class: 'done-grid' }, cards.slice(0, 2)),
+      h('div', { class: 'done-grid' }, cards.slice(2)),
+      h('div', { class: 'row', style: 'margin-top:14px' }, [
+        h('button', { class: 'btn primary big', type: 'button', id: 'submitBtn', onclick: submitAll }, '선생님께 제출하기'),
+        h('span', { class: 's-msg', id: 'submitMsg' })
+      ]),
+      h('p', { class: 'small muted', style: 'margin-top:auto;margin-bottom:0' },
+        '© 2026 티쳐무 · 모든 권리 보유. 학교 수업 목적으로만 이용해 주세요. ' +
+        '학번과 이름만 사용하며 그 밖의 개인정보는 받지 않습니다. ' +
+        '공용 컴퓨터라면 다 하고 나서 오른쪽 위 [나가기] 를 꼭 눌러 주세요.')
+    ]));
+  }
+});
+</script>
