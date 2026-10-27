@@ -244,7 +244,7 @@ STEP 4 표에는 STEP 3 에 적은 세 줄이 **회색으로 자동으로 나타
 
 ```bash
 npm run check     # 배포 전 점검 (문법·끼워 넣는 차례·CSS 클래스·저작권·앱스 스크립트 함정)
-npm test          # 179가지 (정답표를 데이터에서 다시 계산해 대조 + 이어짐 + 로그인 + 서버)
+npm test          # 180가지 (정답표를 데이터에서 다시 계산해 대조 + 이어짐 + 로그인 + 서버)
 npm run preview   # dist/preview.html — 배포하지 않고 브라우저에서 확인
 npm run pack      # dist/appsscript/ — 붙여 넣을 파일 11개
 npm run build     # 위 넷을 차례로
