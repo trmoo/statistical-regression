@@ -1,0 +1,127 @@
+<!doctype html>
+<!--
+  광고비와 매출 사이의 관계 알아보기 — 체험 페이지 안내
+  © 2026 티쳐무 · 모든 권리 보유 (오픈소스 라이선스 없음)
+  깃허브 Pages 첫 화면. tools/site.mjs 가 만든다.
+  체험 화면은 서버 없이 브라우저 안의 가짜 시트에서 진짜 서버 코드(Code.gs)를 돌린다.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>광고비와 매출 사이의 관계 알아보기 — 체험 페이지</title>
+  <meta name="description" content="오렌지3으로 단순 · 다중 선형 회귀를 돌려 보는 통계적 회귀 분석 활동지(1차시) — 학생 화면과 선생님 화면을 미리 써 보는 체험 페이지">
+  <style>
+    :root{
+      --bg:#f6f3ee; --card:#fff; --ink:#1d2430; --sub:#5b6474; --line:#e3ddd3;
+      --brand:#b45309; --brand2:#d97706; --accent:#e8684a;
+      --warn:#8a5a00; --warnbg:#fff5df; --infobg:#eaf0fa;
+      --radius:18px; --shadow:0 2px 12px rgba(40,30,20,.08);
+    }
+    *{box-sizing:border-box}
+    body{margin:0; background:var(--bg); color:var(--ink);
+      font:18px/1.75 "Pretendard","Noto Sans KR","Malgun Gothic","맑은 고딕",-apple-system,sans-serif;
+      -webkit-text-size-adjust:100%}
+    a{color:var(--brand)}
+    .wrap{max-width:1080px; margin:0 auto; padding:0 16px}
+    header{background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; padding:40px 0 34px}
+    header h1{margin:0; font-size:clamp(28px,4.6vw,42px); font-weight:900; letter-spacing:-.02em}
+    header .tag{display:inline-block; background:rgba(255,255,255,.18); border-radius:999px; padding:2px 14px;
+      font-size:15px; font-weight:700; margin-bottom:10px}
+    header p{margin:12px 0 0; font-size:clamp(17px,2.2vw,20px); opacity:.95; max-width:820px}
+    main{padding:28px 0 12px}
+    .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); gap:20px}
+    .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);
+      padding:24px 24px 22px; display:flex; flex-direction:column}
+    .card h2{margin:0 0 6px; font-size:26px; font-weight:900}
+    .card .who{color:var(--sub); margin:0 0 14px}
+    .go{display:block; text-align:center; text-decoration:none; font-weight:900; font-size:22px; color:#fff;
+      background:var(--brand); border-radius:14px; padding:16px 18px; margin:4px 0 16px}
+    .go:hover,.go:focus-visible{background:var(--brand2)}
+    .go.teacher{background:var(--accent)}
+    .go.teacher:hover,.go.teacher:focus-visible{background:#d4553a}
+    .acct{background:var(--infobg); border-radius:12px; padding:12px 16px; margin:0 0 14px}
+    .acct b.big{font-size:22px; letter-spacing:.02em}
+    code{font:inherit; font-weight:800; background:#fff; border:1px solid var(--line); border-radius:7px; padding:0 7px}
+    h3{margin:6px 0 4px; font-size:19px}
+    ul{margin:4px 0 0; padding-left:1.25em}
+    li{margin:3px 0}
+    .note{background:var(--warnbg); border:1px solid #ecd39b; color:#5b3c00; border-radius:var(--radius);
+      padding:20px 24px; margin:24px 0 0}
+    .note h2{margin:0 0 6px; font-size:22px; color:var(--warn)}
+    .use{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:20px 24px; margin:20px 0 0}
+    .use h2{margin:0 0 6px; font-size:22px}
+    footer{color:var(--sub); font-size:15px; text-align:center; padding:26px 16px 36px}
+    @media (max-width:560px){ body{font-size:17px} .card{padding:20px 18px} .go{font-size:20px} }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <span class="tag">체험 페이지</span>
+      <h1>📈 광고비와 매출 사이의 관계 알아보기</h1>
+      <p>광고비(TV · Radio · Newspaper)와 매출(Sales) 200행을 <b>오렌지3</b>으로 분석하고, 상관계수 · 단순 선형 회귀 3종 · 다중 선형 회귀의 평가 지표와 회귀식을 적어 제출하는 <b>1차시 · 통계적 회귀 분석</b> 활동지입니다. 적은 값은 바로 채점되고, 선생님은 반별 제출 현황을 봅니다.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="cards">
+      <section class="card">
+        <h2>🧑‍🎓 학생 화면</h2>
+        <p class="who">STEP 1~4 카드를 넘기며 오렌지3 결과를 옮겨 적고, 「광고비를 어디에 쓸까」 에 두 번 답합니다.</p>
+        <a class="go" href="student.html">학생 화면 열기 →</a>
+        <div class="acct">학번 <b class="big">10101</b> · 비밀번호 <b class="big">pw1234</b><br><span style="color:var(--sub)">이미 제출한 학생입니다 — 다 채운 모습을 볼 수 있어요.</span></div>
+        <h3>다른 계정</h3>
+        <ul>
+          <li><code>10104</code> — 처음 오는 학생 (이름 · 비밀번호를 새로 정합니다)</li>
+          <li><code>10102</code> — 선생님이 비밀번호를 초기화한 학생 (이름 김영희, 아직 쓰는 중)</li>
+          <li><code>10103</code> / <code>pw1234</code> — 틀린 답을 낸 학생 (자동 채점이 어떻게 보이는지)</li>
+        </ul>
+        <h3>해 볼 것</h3>
+        <ul>
+          <li>STEP 1 데이터 · 변수 → STEP 2 상관계수 → STEP 3 단순 선형 회귀 3종 → STEP 4 다중 선형 회귀</li>
+          <li>값을 적으면 바로 정답 · 오답이 표시되고, 오렌지3 화면 캡처를 붙일 수 있습니다(Ctrl+V).</li>
+          <li>창을 좁고 길게 줄이면(학생이 화면을 반으로 갈라 오렌지3 와 함께 볼 때) 세로 판으로 바뀝니다.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>👩‍🏫 선생님 화면</h2>
+        <p class="who">반별 제출 현황과 학생마다의 답 · 정답률을 봅니다.</p>
+        <a class="go teacher" href="teacher.html">선생님 화면 열기 →</a>
+        <div class="acct">선생님 화면 암호 <b class="big">teach1234</b></div>
+        
+        <h3>해 볼 것</h3>
+        <ul>
+          <li>반별 제출 현황판 — 🟩 제출 · 🟧 제출 후 수정 · 🟦 작성 중 · ⬜ 안 들어옴, 칸을 누르면 그 학생이 열립니다.</li>
+          <li>학생 답 보기 — 문항마다 정답 · 오답과 붙인 캡처 그림</li>
+          <li>비밀번호 초기화 — 잊은 학생을 다시 정하게 합니다(적은 답은 그대로 남습니다).</li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="note">
+      <h2>⚠ 알아 두세요</h2>
+      <ul>
+        <li>체험 화면은 <b>서버 없이 이 브라우저 안의 가짜 시트</b>에서 진짜 서버 코드를 돌립니다. 적은 내용은 어디에도 보내지 않으며,
+          <b>새로 고치거나 창을 닫으면 처음 상태</b>로 돌아갑니다.</li>
+        <li><b>학생 화면과 선생님 화면은 서로 이어져 있지 않습니다.</b> 저마다 따로 지어낸 반이라, 학생 화면에서 낸 답이 선생님 화면에 나타나지 않습니다. 실제 앱에서는 한 스프레드시트로 이어집니다.</li>
+          <li>진짜 구글 드라이브가 없어 붙인 캡처 그림은 이 브라우저 안에만 남습니다.</li>
+        <li>진짜 학생 이름 · 학번은 넣지 마세요. 화면에 나오는 학생은 모두 지어낸 사람입니다.</li>
+      </ul>
+    </section>
+
+    <section class="use">
+      <h2>🏫 우리 반에서 쓰려면</h2>
+      <p style="margin:0">구글 스프레드시트에 붙여 쓰는 앱스 스크립트 웹앱이라, 학생의 기록은 선생님의 구글 드라이브에만 쌓입니다.
+        <a href="https://trmoo.github.io/comedu_portal/">티쳐무의 정보 수업 도구함</a>에서 「교사용 사본 만들기」를 누르면
+        배포까지 따라 하는 안내가 나옵니다. 코드는 <a href="https://github.com/trmoo/statistical-regression">저장소</a>에 있습니다.</p>
+    </section>
+  </main>
+
+  <footer>
+    © 2026 티쳐무 · 모든 권리 보유 · 학교 수업 목적으로만 이용해 주세요 ·
+    <a href="https://github.com/trmoo/statistical-regression">저장소</a>
+  </footer>
+</body>
+</html>

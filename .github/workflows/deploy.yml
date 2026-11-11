@@ -1,0 +1,49 @@
+# 체험 페이지 배포 — demo/ 폴더(안내 · 학생 · 선생님 체험 화면)를 깃허브 Pages 에 올린다.
+# © 2026 티쳐무 · 모든 권리 보유
+#
+# 이 저장소는 앱스 스크립트에 붙여 넣는 배포본(dist/appsscript/)만 보관한다. 진짜 앱은 Pages 에서 돌지 않는다.
+# demo/ 는 원본 앱 폴더의 `node tools/site.mjs` 가 만든 것 — 가짜 시트 위에서 진짜 Code.gs 가 돌아 어디에도 보내지 않는다.
+name: 체험 페이지 배포
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 체험 페이지 점검 (파일 · 저작권 · 가짜 서버)
+        run: |
+          for f in index.html student.html teacher.html; do
+            test -f "demo/$f" || { echo "demo/$f 이 없습니다"; exit 1; }
+            grep -q "© 2026 티쳐무" "demo/$f" || { echo "demo/$f 에 저작권 표시가 없습니다"; exit 1; }
+          done
+          for f in student.html teacher.html; do
+            grep -q "FAKE_SERVER" "demo/$f" || { echo "demo/$f 에 가짜 서버가 없습니다"; exit 1; }
+          done
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: demo
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
